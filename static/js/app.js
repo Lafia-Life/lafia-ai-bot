@@ -2,8 +2,29 @@ const state = {
   documents: [],
 };
 
+const THINKING_FRAMES = ["Thinking", "Thinking.", "Thinking..", "Thinking..."];
+
 function $(selector) {
   return document.querySelector(selector);
+}
+
+function startThinkingAnimation(bubble) {
+  stopThinkingAnimation(bubble);
+  let frameIndex = 0;
+  bubble.textContent = THINKING_FRAMES[frameIndex];
+  const timerId = window.setInterval(() => {
+    frameIndex = (frameIndex + 1) % THINKING_FRAMES.length;
+    bubble.textContent = THINKING_FRAMES[frameIndex];
+  }, 450);
+  bubble.dataset.thinkingTimer = String(timerId);
+}
+
+function stopThinkingAnimation(bubble) {
+  const timerId = bubble.dataset.thinkingTimer;
+  if (timerId) {
+    window.clearInterval(Number(timerId));
+    delete bubble.dataset.thinkingTimer;
+  }
 }
 
 function renderDocuments(documents) {
@@ -199,24 +220,38 @@ async function handleScrape(event) {
 async function handleChat(event) {
   event.preventDefault();
   const form = event.target;
-  const chatStatus = $("#chat-status");
-  if (!chatStatus) {
-    return;
-  }
   const textarea = form.querySelector("textarea[name='question']");
   const sendButton = form.querySelector("button[type='submit']");
-  const question = textarea.value.trim();
+  const chatStatus = $("#chat-status");
+  const question = textarea?.value.trim() || "";
 
   if (!question) {
     return;
   }
 
   appendMessage("user", question);
-  const assistantBubble = appendMessage("assistant", "");
-  textarea.value = "";
-  chatStatus.style.color = "";
-  chatStatus.textContent = "Thinking...";
-  sendButton.disabled = true;
+  const assistantBubble = appendMessage("assistant", "Thinking...");
+  assistantBubble.dataset.placeholder = "true";
+  startThinkingAnimation(assistantBubble);
+
+  if (textarea) {
+    textarea.value = "";
+  }
+  if (chatStatus) {
+    chatStatus.style.color = "";
+    chatStatus.textContent = "";
+  }
+  if (sendButton) {
+    sendButton.disabled = true;
+  }
+
+  const clearPlaceholder = () => {
+    stopThinkingAnimation(assistantBubble);
+    if (assistantBubble.dataset.placeholder === "true") {
+      assistantBubble.textContent = "";
+      delete assistantBubble.dataset.placeholder;
+    }
+  };
 
   const decoder = new TextDecoder();
   let buffer = "";
@@ -226,6 +261,7 @@ async function handleChat(event) {
     switch (payload.type) {
       case "delta": {
         if (payload.content) {
+          clearPlaceholder();
           assistantBubble.textContent += payload.content;
           const container = $("#chat-messages");
           if (container) {
@@ -240,18 +276,25 @@ async function handleChat(event) {
       }
       case "done": {
         if (payload.answer) {
+          clearPlaceholder();
           assistantBubble.textContent = payload.answer;
+        } else {
+          clearPlaceholder();
         }
         if (payload.citations) {
           renderReferences(payload.citations);
         }
-        chatStatus.textContent = "";
         isDone = true;
         break;
       }
       case "error": {
-        chatStatus.style.color = "#dc2626";
-        chatStatus.textContent = payload.message || "An error occurred while streaming the answer.";
+        clearPlaceholder();
+        const message = payload.message || "An error occurred while streaming the answer.";
+        assistantBubble.textContent = message;
+        if (chatStatus) {
+          chatStatus.style.color = "#dc2626";
+          chatStatus.textContent = message;
+        }
         isDone = true;
         break;
       }
@@ -317,12 +360,21 @@ async function handleChat(event) {
       }
     }
   } catch (err) {
-    chatStatus.style.color = "#dc2626";
-    chatStatus.textContent = err instanceof Error ? err.message : "Chat request failed.";
+    clearPlaceholder();
+    const message = err instanceof Error ? err.message : "Chat request failed.";
+    assistantBubble.textContent = message;
+    if (chatStatus) {
+      chatStatus.style.color = "#dc2626";
+      chatStatus.textContent = message;
+    }
   } finally {
-    sendButton.disabled = false;
-    if (!isDone && chatStatus.textContent === "Thinking...") {
-      chatStatus.textContent = "";
+    if (sendButton) {
+      sendButton.disabled = false;
+    }
+    stopThinkingAnimation(assistantBubble);
+    if (assistantBubble.dataset.placeholder === "true") {
+      assistantBubble.textContent = "";
+      delete assistantBubble.dataset.placeholder;
     }
   }
 }

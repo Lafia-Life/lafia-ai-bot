@@ -64,8 +64,14 @@ def _coerce_text(value) -> str:
                 coerced = _coerce_text(value[key])
                 if coerced:
                     return coerced
-        parts = [_coerce_text(item) for item in value.values()]
-        return "".join(part for part in parts if part)
+        parts = []
+        for key, item in value.items():
+            if key in {"role", "index", "finish_reason"}:
+                continue
+            coerced = _coerce_text(item)
+            if coerced:
+                parts.append(coerced)
+        return "".join(parts)
     content_attr = getattr(value, "content", None)
     if content_attr is not None:
         return _coerce_text(content_attr)
