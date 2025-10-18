@@ -105,6 +105,39 @@ Minimal FastAPI application that lets you upload PDF documents, index them with 
 
 ---
 
+## Run App + Ollama with Docker Compose
+
+The included `docker-compose.yml` launches both the PDF chat app and an Ollama service that automatically pulls a local model (defaults to `llama3`).
+
+1. **Set up environment**
+
+   ```bash
+   cp .env.example .env
+   # update values as needed (no API key required for Ollama, but OPENAI_API_KEY must be non-empty)
+   ```
+
+2. **Pick an Ollama model (optional)**
+
+   By default, the compose file pulls `llama3`. Override this by exporting `OLLAMA_MODEL` when you run docker compose, e.g. `OLLAMA_MODEL=phi3`.
+
+3. **Build and start both services**
+
+   ```bash
+   docker compose up --build
+   ```
+
+   The first startup downloads the Ollama model (can be several GB). Subsequent runs reuse the `ollama_data` volume.
+
+4. **Access the UI**
+
+   Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The app points to the Ollama container automatically through the internal network.
+
+5. **Stop the stack**
+
+   Use `Ctrl+C`, or run `docker compose down` to stop and clean up containers. Volumes remain unless you add `--volumes`.
+
+---
+
 ## How It Works
 
 - **Upload**: PDFs are stored under `storage/uploads/`, parsed with `pypdf`, chunked into overlapping windows, and embedded via OpenAI or a local SentenceTransformers model.
