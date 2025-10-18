@@ -67,29 +67,28 @@ def _build_chunk_payload(
     chunk_overlap: int,
 ) -> Tuple[List[str], List[dict], List[str]]:
     texts: List[str] = []
+    chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    texts: List[str] = []
     metadatas: List[dict] = []
     ids: List[str] = []
 
-    for page_number, text in pages:
-        page_chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        for local_index, chunk in enumerate(page_chunks):
-            chunk_id = f"{document_id}_{page_number}_{local_index}"
-            texts.append(chunk)
-            metadatas.append(
-                {
-                    "document_id": document_id,
-                    "filename": filename,
-                    "page_start": page_number,
-                    "page_end": page_number,
-                    "chunk": local_index,
-                    "url": "",
-                    "source_type": "pdf",
-                }
-            )
-            ids.append(chunk_id)
+    for index, chunk in enumerate(chunks):
+        chunk_id = f"{document_id}_web_{index}"
+        texts.append(chunk)
+        metadatas.append(
+            {
+                "document_id": document_id,
+                "filename": title,
+                "page_start": index + 1,
+                "page_end": index + 1,
+                "chunk": index,
+                "url": url,
+                "source_type": "web",
+            }
+        )
+        ids.append(chunk_id)
+
     return texts, metadatas, ids
-
-
 def _fetch_web_content(url: str) -> Tuple[str, str]:
     settings = get_settings()
     headers = {
@@ -115,16 +114,15 @@ def _fetch_web_content(url: str) -> Tuple[str, str]:
             proxies=proxies,
         ) as client:
             response = client.get(url)
+            response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 403:
             raise ValueError(
-                "The remote site blocked the scrape request (HTTP 403). Try providing SCRAPER_PROXY_URL or a different SCRAPER_USER_AGENT."
+                "The remote site blocked the scrape request (HTTP 403). Configure SCRAPER_PROXY_URL or adjust SCRAPER_USER_AGENT to mimic an allowed client."
             ) from exc
         raise
 
-    response.raise_for_status()
     html = response.text
-
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "noscript", "svg", "canvas", "iframe"]):
         tag.decompose()
@@ -172,22 +170,7 @@ def _build_web_chunk_payload(
                 response = client.get(url)
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 403:
-                raise ValueError(
-                    "The remote site blocked the scrape request (HTTP 403). Configure SCRAPER_PROXY_URL or adjust SCRAPER_USER_AGENT to mimic an allowed client."
-                ) from exc
-            raise
-
-
-def ingest_document(upload_bytes: bytes, filename: str) -> UploadResponse:
-    settings: Settings = get_settings()
-    document_store = DocumentStore(settings.chroma_path)
-    collection = get_collection()
-
-    document_id = str(uuid.uuid4())
-    saved_path = _save_upload(upload_bytes, filename, settings.uploads_path, document_id)
-
-    pages = _extract_pages(saved_path)
+ 
     texts, metadatas, ids = _build_chunk_payload(
         document_id=document_id,
         filename=filename,
