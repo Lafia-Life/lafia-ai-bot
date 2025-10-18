@@ -163,8 +163,17 @@ async function handleUpload(event) {
       body: formData,
     });
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Upload failed");
+      const bodyText = await response.text();
+      let message = `Upload failed (${response.status})`;
+      if (bodyText) {
+        try {
+          const errorPayload = JSON.parse(bodyText);
+          message = errorPayload?.detail || message;
+        } catch (parseErr) {
+          message = bodyText;
+        }
+      }
+      throw new Error(message);
     }
     const payload = await response.json();
     status.textContent = `Uploaded ${payload.document.filename} (${payload.chunks_indexed} chunks).`;
