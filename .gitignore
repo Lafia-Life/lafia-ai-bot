@@ -1,0 +1,5 @@
+__pycache__/
+.env
+storage/chroma/
+storage/uploads/
+*.sqlite

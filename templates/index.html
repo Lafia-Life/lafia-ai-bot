@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PDF Chat Assistant</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="upload">
+        <h1>PDF Chat Assistant</h1>
+        <form id="upload-form">
+          <label for="file-input">Upload PDF</label>
+          <input id="file-input" name="file" type="file" accept="application/pdf" required />
+          <button type="submit">Upload</button>
+        </form>
+        <div id="upload-status" class="status" role="status"></div>
+      </section>
+
+      <section class="documents">
+        <h2>Indexed Documents</h2>
+        <ul id="document-list"></ul>
+      </section>
+
+      <section class="chat">
+        <h2>Ask a Question</h2>
+        <form id="chat-form">
+          <textarea id="question" name="question" rows="4" placeholder="Ask about the indexed PDFs..." required></textarea>
+          <button type="submit">Send</button>
+        </form>
+        <div id="chat-response"></div>
+      </section>
+    </main>
+
+    <script src="/static/js/app.js" defer></script>
+  </body>
+</html>
