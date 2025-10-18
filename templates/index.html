@@ -21,13 +21,23 @@
 
       <section id="upload-view" class="view">
         <div class="panel">
-          <h2>Upload PDFs</h2>
-          <p class="panel-description">Add the documents you want to ask questions about. We'll index them for lightning-fast answers.</p>
+          <h2>Add Sources</h2>
+          <p class="panel-description">Upload PDF reports or scrape web pages to include them in your knowledge base.</p>
           <form id="upload-form" class="upload-form">
             <input id="file-input" name="file" type="file" accept="application/pdf" required />
             <button type="submit">Upload PDF</button>
           </form>
           <div id="upload-status" class="status" role="status"></div>
+
+          <div class="divider">
+            <span>or</span>
+          </div>
+
+          <form id="scrape-form" class="scrape-form">
+            <input id="url-input" name="url" type="url" placeholder="https://example.com/article" required />
+            <button type="submit">Scrape URL</button>
+          </form>
+          <div id="scrape-status" class="status" role="status"></div>
         </div>
 
         <div class="panel">

@@ -41,9 +41,22 @@ function renderDocuments(documents) {
     const item = document.createElement("li");
     const name = document.createElement("span");
     name.textContent = doc.filename;
-    const pages = document.createElement("span");
-    pages.textContent = `${doc.page_count} pages`;
-    item.append(name, pages);
+    const meta = document.createElement("span");
+    meta.className = "document-meta";
+    if (doc.source_type === "web") {
+      meta.textContent = "Web source";
+      if (doc.url) {
+        try {
+          const urlObj = new URL(doc.url);
+          meta.textContent = `Web · ${urlObj.hostname}`;
+        } catch (err) {
+          meta.textContent = `Web · ${doc.url}`;
+        }
+      }
+    } else {
+      meta.textContent = `PDF · ${doc.page_count} pages`;
+    }
+    item.append(name, meta);
     list.appendChild(item);
   }
 }
@@ -121,14 +134,70 @@ function renderReferences(citations) {
     const meta = document.createElement("p");
     meta.className = "reference-meta";
     const score = typeof citation.score === "number" ? citation.score.toFixed(2) : "n/a";
-    meta.textContent = `Pages ${citation.page_start}-${citation.page_end} · score ${score}`;
+    const location = citation.source_type === "web"
+      ? `Section ${citation.page_start}`
+      : `Pages ${citation.page_start}-${citation.page_end}`;
+    meta.textContent = `${location} · score ${score}`;
 
     const excerpt = document.createElement("p");
     excerpt.className = "reference-excerpt";
     excerpt.textContent = citation.excerpt || "No excerpt available.";
 
     card.append(title, meta, excerpt);
+
+    if (citation.url) {
+      const link = document.createElement("a");
+      link.className = "reference-link";
+      link.href = citation.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = citation.url;
+      card.appendChild(link);
+    }
+
     list.appendChild(card);
+  }
+}
+
+async function handleScrape(event) {
+  event.preventDefault();
+  const form = event.target;
+  const status = $("#scrape-status");
+  const input = form.querySelector("input[name='url']");
+  const url = input.value.trim();
+  if (!url) {
+    return;
+  }
+
+  status.style.color = "";
+  status.textContent = "Scraping...";
+
+  try {
+    const response = await fetch("/api/scrape", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    if (!response.ok) {
+      const bodyText = await response.text();
+      let message = "Scrape request failed";
+      if (bodyText) {
+        try {
+          const errorPayload = JSON.parse(bodyText);
+          message = errorPayload?.detail || message;
+        } catch (parseErr) {
+          message = bodyText;
+        }
+      }
+      throw new Error(message);
+    }
+    const payload = await response.json();
+    status.textContent = `Scraped and indexed "${payload.document.filename}".`;
+    form.reset();
+    await fetchDocuments();
+  } catch (err) {
+    status.style.color = "#dc2626";
+    status.textContent = err instanceof Error ? err.message : "Scrape request failed.";
   }
 }
 
@@ -265,12 +334,14 @@ window.addEventListener("DOMContentLoaded", () => {
   const navChat = $("#nav-chat");
   const startChatButton = $("#start-chat");
   const referenceList = $("#reference-list");
+  const scrapeForm = $("#scrape-form");
 
   uploadForm.addEventListener("submit", handleUpload);
   chatForm.addEventListener("submit", handleChat);
   navUpload.addEventListener("click", () => showView("upload"));
   navChat.addEventListener("click", () => showView("chat"));
   startChatButton.addEventListener("click", () => showView("chat"));
+  scrapeForm?.addEventListener("submit", handleScrape);
 
   showView("upload");
   const placeholder = document.createElement("p");

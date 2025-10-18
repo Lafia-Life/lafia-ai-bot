@@ -60,6 +60,7 @@ Minimal FastAPI application that lets you upload PDF documents, index them with 
 7. **Open the UI**
 
    Visit [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser. Upload PDFs, then switch to the Chat view to ask questions. Responses stream token-by-token, and supporting passages appear in the left panel.
+   Use **Scrape URL** to ingest a web page when the content is not available as a PDF; the app will cite the source link in answers.
 
 8. **Stop the server**
 
@@ -141,6 +142,7 @@ The included `docker-compose.yml` launches both the PDF chat app and an Ollama s
 ## How It Works
 
 - **Upload**: PDFs are stored under `storage/uploads/`, parsed with `pypdf`, chunked into overlapping windows, and embedded via OpenAI or a local SentenceTransformers model.
+- **Web Scrape**: Fetches HTML with httpx + BeautifulSoup, strips boilerplate, chunks the cleaned article text, and stores citations with the original URL.
 - **Index**: Embeddings and metadata (document id, filename, page numbers) are persisted in a local Chroma collection under `storage/chroma/`.
 - **Chat**: A question is embedded, relevant chunks are retrieved, and the response is generated with the configured chat model. Answers stream back in real time, and citations include excerpts for quick preview.
 - **Caching**: Recently asked questions are cached so repeated prompts return instantly without re-hitting the model.

@@ -5,9 +5,9 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from app.config import Settings, get_openai_api_key, get_settings
-from app.schemas import ChatRequest, DocumentSummary, UploadResponse
+from app.schemas import ChatRequest, DocumentSummary, ScrapeRequest, UploadResponse
 from app.services.document_store import DocumentStore
-from app.services.ingestion import ingest_document
+from app.services.ingestion import ingest_document, ingest_web_page
 from app.services.retrieval import stream_answer
 
 app = FastAPI(title="PDF Chat Assistant")
@@ -41,6 +41,14 @@ def upload_document(
 
     response = ingest_document(upload_bytes=contents, filename=file.filename)
     return response
+
+
+@app.post("/api/scrape", response_model=UploadResponse)
+def scrape_document(payload: ScrapeRequest) -> UploadResponse:
+    try:
+        return ingest_web_page(str(payload.url))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/chat")

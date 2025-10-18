@@ -48,8 +48,15 @@ def _format_context(results: List[dict]) -> str:
     for item in results:
         metadata = item["metadata"]
         text = item["text"]
+        source_type = metadata.get("source_type", "pdf")
+        location: str
+        if source_type == "web":
+            location = f"section {metadata.get('page_start', 1)}"
+        else:
+            location = f"pages {metadata.get('page_start', 1)}-{metadata.get('page_end', metadata.get('page_start', 1))}"
+        source_name = metadata.get("url") or metadata.get("filename", "Unknown source")
         context_blocks.append(
-            f"Source: {metadata['filename']} (pages {metadata['page_start']}-{metadata['page_end']})\n{text}"
+            f"Source: {source_name} ({location})\n{text}"
         )
     return "\n\n".join(context_blocks)
 
@@ -82,14 +89,20 @@ def _to_citations(results: List[dict]) -> List[Citation]:
         excerpt = item.get("text", "").strip()
         if excerpt and len(excerpt) > 400:
             excerpt = excerpt[:397].rstrip() + "..."
+        source_type = metadata.get("source_type", "pdf")
+        url = metadata.get("url")
+        page_start = int(metadata.get("page_start", 0) or 0)
+        page_end = int(metadata.get("page_end", page_start) or page_start)
         citations.append(
             Citation(
                 document_id=metadata["document_id"],
                 filename=metadata["filename"],
-                page_start=metadata["page_start"],
-                page_end=metadata["page_end"],
+                page_start=page_start,
+                page_end=page_end,
                 score=round(similarity, 4),
                 excerpt=excerpt,
+                source_type=source_type,
+                url=url,
             )
         )
     return citations

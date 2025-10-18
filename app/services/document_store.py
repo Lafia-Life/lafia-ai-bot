@@ -22,7 +22,7 @@ class DocumentStore:
 
     def upsert(self, summary: DocumentSummary) -> None:
         data = self._read()
-        data[summary.document_id] = summary.dict()
+        data[summary.document_id] = summary.model_dump()
         self._write(data)
 
     def list(self) -> List[DocumentSummary]:

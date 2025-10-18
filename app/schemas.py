@@ -1,12 +1,14 @@
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 
 
 class DocumentSummary(BaseModel):
     document_id: str
     filename: str
-    page_count: int
+    page_count: int = 0
+    source_type: str = "pdf"
+    url: Optional[str] = None
 
 
 class UploadResponse(BaseModel):
@@ -19,6 +21,10 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
 
 
+class ScrapeRequest(BaseModel):
+    url: HttpUrl
+
+
 class Citation(BaseModel):
     document_id: str
     filename: str
@@ -26,6 +32,8 @@ class Citation(BaseModel):
     page_end: int
     score: float
     excerpt: str
+    source_type: str = "pdf"
+    url: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
