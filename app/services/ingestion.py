@@ -91,13 +91,39 @@ def _build_chunk_payload(
 
 
 def _fetch_web_content(url: str) -> Tuple[str, str]:
+    settings = get_settings()
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; PDFChatBot/1.0; +https://github.com/egesamichael/chatlearning)",
+        "User-Agent": settings.scraper_user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
-    with httpx.Client(timeout=20.0, follow_redirects=True, headers=headers) as client:
-        response = client.get(url)
-        response.raise_for_status()
-        html = response.text
+    proxies = None
+    if settings.scraper_proxy_url:
+        proxies = {
+            "http://": settings.scraper_proxy_url,
+            "https://": settings.scraper_proxy_url,
+        }
+
+    try:
+        with httpx.Client(
+            timeout=settings.scraper_timeout,
+            follow_redirects=True,
+            headers=headers,
+            http2=True,
+            proxies=proxies,
+        ) as client:
+            response = client.get(url)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 403:
+            raise ValueError(
+                "The remote site blocked the scrape request (HTTP 403). Try providing SCRAPER_PROXY_URL or a different SCRAPER_USER_AGENT."
+            ) from exc
+        raise
+
+    response.raise_for_status()
+    html = response.text
 
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "noscript", "svg", "canvas", "iframe"]):
@@ -135,24 +161,22 @@ def _build_web_chunk_payload(
     texts: List[str] = []
     metadatas: List[dict] = []
     ids: List[str] = []
-
-    for index, chunk in enumerate(chunks):
-        chunk_id = f"{document_id}_web_{index}"
-        texts.append(chunk)
-        metadatas.append(
-            {
-                "document_id": document_id,
-                "filename": title,
-                "page_start": index + 1,
-                "page_end": index + 1,
-                "chunk": index,
-                "url": url,
-                "source_type": "web",
-            }
-        )
-        ids.append(chunk_id)
-
-    return texts, metadatas, ids
+        try:
+            with httpx.Client(
+                timeout=settings.scraper_timeout,
+                follow_redirects=True,
+                headers=headers,
+                http2=True,
+                proxies=proxies,
+            ) as client:
+                response = client.get(url)
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 403:
+                raise ValueError(
+                    "The remote site blocked the scrape request (HTTP 403). Configure SCRAPER_PROXY_URL or adjust SCRAPER_USER_AGENT to mimic an allowed client."
+                ) from exc
+            raise
 
 
 def ingest_document(upload_bytes: bytes, filename: str) -> UploadResponse:
