@@ -53,18 +53,30 @@ def _coerce_text(value) -> str:
             return value.decode("utf-8")
         except Exception:  # noqa: BLE001
             return ""
+    if hasattr(value, "model_dump"):
+        try:
+            value = value.model_dump()
+        except Exception:  # noqa: BLE001
+            pass
     if isinstance(value, dict):
-        text = value.get("text") or value.get("content")
-        return _coerce_text(text)
-    if isinstance(value, Iterable):
-        parts = [_coerce_text(item) for item in value]
+        for key in ("content", "text", "message"):
+            if key in value and value[key] is not None:
+                coerced = _coerce_text(value[key])
+                if coerced:
+                    return coerced
+        parts = [_coerce_text(item) for item in value.values()]
         return "".join(part for part in parts if part)
-    text = getattr(value, "text", None)
-    if text:
-        return _coerce_text(text)
-    content = getattr(value, "content", None)
-    if content:
-        return _coerce_text(content)
+    content_attr = getattr(value, "content", None)
+    if content_attr is not None:
+        return _coerce_text(content_attr)
+    text_attr = getattr(value, "text", None)
+    if text_attr is not None:
+        return _coerce_text(text_attr)
+    if isinstance(value, Iterable):
+        parts = [_coerce_text(item) for item in value if item is not None]
+        return "".join(part for part in parts if part)
+    if isinstance(value, (int, float, bool)):
+        return str(value)
     return ""
 
 
@@ -181,24 +193,15 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
         emitted_delta = False
         for chunk in answer_chunks:
             if not chunk:
+                continue
+            emitted_delta = True
+            yield _encode_event({"type": "delta", "content": chunk})
+
+        cached_answer: str = cached.get("answer", "")
+        if not emitted_delta and cached_answer:
             yield _encode_event({"type": "delta", "content": cached_answer})
 
         yield _encode_event(
-    text_attr = getattr(value, "text", None)
-    if text_attr:
-        return _coerce_text(text_attr)
-    content_attr = getattr(value, "content", None)
-    if content_attr:
-        return _coerce_text(content_attr)
-    if hasattr(value, "model_dump"):
-        try:
-            dumped = value.model_dump()
-            return _coerce_text(dumped)
-        except Exception:  # noqa: BLE001
-            pass
-    if isinstance(value, Iterable):
-        parts = [_coerce_text(item) for item in value if item is not None]
-        return "".join(part for part in parts if part)
             {
                 "type": "done",
                 "answer": cached_answer,
@@ -252,7 +255,7 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
         for chunk in stream:
             for choice in chunk.choices:
                 delta = getattr(choice, "delta", None)
-                if not delta:
+                if delta is None:
                     continue
                 content = _coerce_text(delta)
                 if not content:
@@ -264,6 +267,7 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
         return
 
     answer_text = "".join(answer_parts).strip()
+
     yield _encode_event(
         {
             "type": "done",
