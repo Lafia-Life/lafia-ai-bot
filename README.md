@@ -138,6 +138,48 @@ Minimal FastAPI application that lets you upload PDF documents, index them with 
 
 ---
 
+## Offline LLM Option (Ollama)
+
+If you want the whole stack to run without internet access, you can host a local LLM that speaks the OpenAI API using [Ollama](https://ollama.com/):
+
+1. **Install Ollama**
+
+   - macOS / Linux: follow the instructions at [ollama.com/download](https://ollama.com/download).
+   - Windows: use the official preview installer or run inside WSL.
+
+2. **Pull a compatible model**
+
+   ```bash
+   ollama pull llama3
+   ```
+
+   Any OpenAI-compatible Ollama model works (e.g. `phi3`, `mistral`). Larger models need more RAM/VRAM.
+
+3. **Start Ollama’s OpenAI bridge**
+
+   Ollama exposes an OpenAI-style endpoint at `http://127.0.0.1:11434/v1` as soon as it’s running. Keep the Ollama service alive (e.g. `ollama serve`).
+
+4. **Configure the app to use Ollama**
+
+   Update `.env`:
+
+   ```env
+   OPENAI_API_KEY=dummy-key          # any non-empty string
+   OPENAI_BASE_URL=http://127.0.0.1:11434/v1
+   CHAT_MODEL=llama3
+   EMBEDDING_BACKEND=local           # keeps embeddings offline
+   ```
+
+   Since Ollama does not require an API key, any placeholder value is fine.
+
+5. **Run the app as usual**
+
+   Launch `uvicorn` (or the Docker container with `--env-file .env`). The chat endpoint now streams responses from the local LLM, fully offline.
+
+> **Note:** Ollama models can be several GB; download them once while you have connectivity. Performance depends on your CPU/GPU—the smaller models (`phi3:mini`, `llama3:instruct` 8B) offer a good balance for laptops.
+
+---
+
 ## Maintenance Tips
 
 - Delete `storage/chroma/` and `storage/uploads/` to reset the index.
