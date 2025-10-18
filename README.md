@@ -59,8 +59,10 @@ Minimal FastAPI application that lets you upload PDF documents, index them with 
 
 7. **Open the UI**
 
-   Visit [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser. Upload PDFs, then switch to the Chat view to ask questions. Responses stream token-by-token, and supporting passages appear in the left panel.
-   Use **Scrape URL** to ingest a web page when the content is not available as a PDF; the app will cite the source link in answers.
+   - End users: [http://127.0.0.1:8000](http://127.0.0.1:8000) or `/chat` for the read-only chat experience.
+   - Curators: [http://127.0.0.1:8000/upload](http://127.0.0.1:8000/upload) to manage PDFs or scrape web pages.
+
+   Chat responses stream token-by-token, and supporting passages appear in the left panel. Use **Scrape URL** on the upload route when the content is not available as a PDF; the app will cite the source link in answers.
 
 8. **Stop the server**
 
@@ -131,7 +133,8 @@ The included `docker-compose.yml` launches both the PDF chat app and an Ollama s
 
 4. **Access the UI**
 
-   Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The app points to the Ollama container automatically through the internal network.
+   - Chat: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+   - Upload management: [http://127.0.0.1:8000/upload](http://127.0.0.1:8000/upload)
 
 5. **Stop the stack**
 

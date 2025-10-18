@@ -6,34 +6,17 @@ function $(selector) {
   return document.querySelector(selector);
 }
 
-function showView(key) {
-  const uploadView = $("#upload-view");
-  const chatView = $("#chat-view");
-  const navUpload = $("#nav-upload");
-  const navChat = $("#nav-chat");
-
-  if (key === "upload") {
-    uploadView.classList.remove("hidden");
-    chatView.classList.add("hidden");
-    navUpload.classList.add("active");
-    navChat.classList.remove("active");
-  } else {
-    uploadView.classList.add("hidden");
-    chatView.classList.remove("hidden");
-    navUpload.classList.remove("active");
-    navChat.classList.add("active");
-  }
-}
-
 function renderDocuments(documents) {
   const list = $("#document-list");
+  if (!list) {
+    return;
+  }
   list.innerHTML = "";
 
   if (documents.length === 0) {
     const empty = document.createElement("li");
     empty.textContent = "No documents indexed yet.";
     list.appendChild(empty);
-    showView("upload");
     return;
   }
 
@@ -79,6 +62,9 @@ async function handleUpload(event) {
   event.preventDefault();
   const form = event.target;
   const status = $("#upload-status");
+  if (!status) {
+    return;
+  }
   status.style.color = "";
   status.textContent = "Uploading...";
 
@@ -104,6 +90,9 @@ async function handleUpload(event) {
 
 function appendMessage(role, content) {
   const container = $("#chat-messages");
+  if (!container) {
+    throw new Error("Chat container not found");
+  }
   const bubble = document.createElement("div");
   bubble.className = `chat-bubble ${role}`;
   bubble.textContent = content;
@@ -114,6 +103,9 @@ function appendMessage(role, content) {
 
 function renderReferences(citations) {
   const list = $("#reference-list");
+  if (!list) {
+    return;
+  }
   list.innerHTML = "";
 
   if (!citations || citations.length === 0) {
@@ -163,6 +155,9 @@ async function handleScrape(event) {
   event.preventDefault();
   const form = event.target;
   const status = $("#scrape-status");
+  if (!status) {
+    return;
+  }
   const input = form.querySelector("input[name='url']");
   const url = input.value.trim();
   if (!url) {
@@ -205,6 +200,9 @@ async function handleChat(event) {
   event.preventDefault();
   const form = event.target;
   const chatStatus = $("#chat-status");
+  if (!chatStatus) {
+    return;
+  }
   const textarea = form.querySelector("textarea[name='question']");
   const sendButton = form.querySelector("button[type='submit']");
   const question = textarea.value.trim();
@@ -230,7 +228,9 @@ async function handleChat(event) {
         if (payload.content) {
           assistantBubble.textContent += payload.content;
           const container = $("#chat-messages");
-          container.scrollTop = container.scrollHeight;
+          if (container) {
+            container.scrollTop = container.scrollHeight;
+          }
         }
         break;
       }
@@ -330,23 +330,27 @@ async function handleChat(event) {
 window.addEventListener("DOMContentLoaded", () => {
   const uploadForm = $("#upload-form");
   const chatForm = $("#chat-form");
-  const navUpload = $("#nav-upload");
-  const navChat = $("#nav-chat");
-  const startChatButton = $("#start-chat");
   const referenceList = $("#reference-list");
   const scrapeForm = $("#scrape-form");
 
-  uploadForm.addEventListener("submit", handleUpload);
-  chatForm.addEventListener("submit", handleChat);
-  navUpload.addEventListener("click", () => showView("upload"));
-  navChat.addEventListener("click", () => showView("chat"));
-  startChatButton.addEventListener("click", () => showView("chat"));
-  scrapeForm?.addEventListener("submit", handleScrape);
+  if (uploadForm) {
+    uploadForm.addEventListener("submit", handleUpload);
+  }
 
-  showView("upload");
-  const placeholder = document.createElement("p");
-  placeholder.className = "reference-placeholder";
-  placeholder.textContent = "Ask a question to see supporting passages here.";
-  referenceList.appendChild(placeholder);
+  if (scrapeForm) {
+    scrapeForm.addEventListener("submit", handleScrape);
+  }
+
+  if (chatForm) {
+    chatForm.addEventListener("submit", handleChat);
+  }
+
+  if (referenceList) {
+    const placeholder = document.createElement("p");
+    placeholder.className = "reference-placeholder";
+    placeholder.textContent = "Ask a question to see supporting passages here.";
+    referenceList.appendChild(placeholder);
+  }
+
   fetchDocuments().catch((err) => console.error(err));
 });

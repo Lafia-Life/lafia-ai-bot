@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PDF Chat Assistant</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark">📄</span>
+          <h1>PDF Chat Assistant</h1>
+        </div>
+        <div class="header-actions">
+          <span class="header-badge">Chat Only</span>
+        </div>
+      </header>
+
+      <section id="chat-view" class="view">
+        <div class="chat-layout">
+          <aside class="reference-panel">
+            <div class="panel-header">
+              <h2>Document References</h2>
+              <p class="panel-subtitle">Preview the passages backing each answer.</p>
+            </div>
+            <div id="reference-list" class="reference-list"></div>
+          </aside>
+          <section class="conversation-panel">
+            <div id="chat-messages" class="messages"></div>
+            <form id="chat-form" class="chat-form">
+              <label class="sr-only" for="question">Ask a question</label>
+              <div class="chat-input">
+                <textarea id="question" name="question" rows="3" placeholder="Ask about your documents..." required></textarea>
+                <div class="chat-actions">
+                  <button type="submit">Send</button>
+                </div>
+              </div>
+              <p id="chat-status" class="status" role="status"></p>
+            </form>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/js/app.js?v=20251018" defer></script>
+  </body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Manage Documents · PDF Chat Assistant</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark">📄</span>
+          <h1>Manage Documents</h1>
+        </div>
+        <div class="header-actions">
+          <a class="header-link" href="/chat">Open Chat</a>
+        </div>
+      </header>
+
+      <section id="upload-view" class="view">
+        <div class="panel">
+          <h2>Add Sources</h2>
+          <p class="panel-description">Upload PDF reports or scrape web pages to include them in your knowledge base.</p>
+          <form id="upload-form" class="upload-form">
+            <input id="file-input" name="file" type="file" accept="application/pdf" required />
+            <button type="submit">Upload PDF</button>
+          </form>
+          <div id="upload-status" class="status" role="status"></div>
+
+          <div class="divider">
+            <span>or</span>
+          </div>
+
+          <form id="scrape-form" class="scrape-form">
+            <input id="url-input" name="url" type="url" placeholder="https://example.com/article" required />
+            <button type="submit">Scrape URL</button>
+          </form>
+          <div id="scrape-status" class="status" role="status"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Indexed Documents</h3>
+          </div>
+          <ul id="document-list" class="document-list"></ul>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/js/app.js?v=20251018" defer></script>
+  </body>
+</html>

@@ -22,8 +22,14 @@ def get_document_store() -> DocumentStore:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("index.html", {"request": request})
+@app.get("/chat", response_class=HTMLResponse)
+def chat_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("chat.html", {"request": request})
+
+
+@app.get("/upload", response_class=HTMLResponse)
+def upload_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("upload.html", {"request": request})
 
 
 @app.get("/api/documents", response_model=list[DocumentSummary])
