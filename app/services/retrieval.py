@@ -1,4 +1,7 @@
-from typing import List
+import json
+from typing import Generator, List
+
+from fastapi.encoders import jsonable_encoder
 
 from app.config import Settings, get_openai_client, get_settings
 from app.schemas import ChatRequest, ChatResponse, Citation
@@ -86,4 +89,66 @@ def answer_question(payload: ChatRequest) -> ChatResponse:
     return ChatResponse(
         answer=answer_text,
         citations=_to_citations(raw_results),
+    )
+
+
+def _encode_event(payload: dict) -> bytes:
+    return (json.dumps(jsonable_encoder(payload), separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
+    settings: Settings = get_settings()
+    client = get_openai_client(settings)
+    collection = get_collection()
+
+    embedding = embed_query(payload.question)
+    raw_results = query_collection(collection=collection, embedding=embedding, n_results=4)
+
+    if not raw_results:
+        yield _encode_event(
+            {
+                "type": "done",
+                "answer": "I could not find the answer in the uploaded documents.",
+                "citations": [],
+            }
+        )
+        return
+
+    citations = _to_citations(raw_results)
+    yield _encode_event({"type": "references", "citations": citations})
+
+    context = _format_context(raw_results)
+    messages = _build_prompt(payload.question, context)
+
+    answer_parts: List[str] = []
+
+    try:
+        stream = client.chat.completions.create(
+            model=settings.chat_model,
+            messages=messages,
+            temperature=0.2,
+            stream=True,
+        )
+
+        for chunk in stream:
+            for choice in chunk.choices:
+                delta = getattr(choice, "delta", None)
+                if not delta:
+                    continue
+                content = getattr(delta, "content", None)
+                if not content:
+                    continue
+                answer_parts.append(content)
+                yield _encode_event({"type": "delta", "content": content})
+    except Exception as exc:  # noqa: BLE001
+        yield _encode_event({"type": "error", "message": str(exc)})
+        return
+
+    answer_text = "".join(answer_parts).strip()
+    yield _encode_event(
+        {
+            "type": "done",
+            "answer": answer_text,
+            "citations": citations,
+        }
     )

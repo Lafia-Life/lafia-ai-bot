@@ -1,25 +1,20 @@
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from app.config import Settings, get_openai_api_key, get_settings
-from app.schemas import ChatRequest, ChatResponse, DocumentSummary, UploadResponse
+from app.schemas import ChatRequest, DocumentSummary, UploadResponse
 from app.services.document_store import DocumentStore
 from app.services.ingestion import ingest_document
-from app.services.retrieval import answer_question
+from app.services.retrieval import stream_answer
 
 app = FastAPI(title="PDF Chat Assistant")
 
 settings = get_settings()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-
-
-def ensure_api_key() -> None:
-    if not get_openai_api_key():
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured.")
 
 
 def get_document_store() -> DocumentStore:
@@ -48,8 +43,8 @@ def upload_document(
     return response
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-def chat(payload: ChatRequest) -> ChatResponse:
+@app.post("/api/chat")
+def chat(payload: ChatRequest) -> StreamingResponse:
     if not get_openai_api_key():
         raise HTTPException(
             status_code=503,
@@ -57,4 +52,4 @@ def chat(payload: ChatRequest) -> ChatResponse:
         )
     if not payload.question.strip():
         raise HTTPException(status_code=400, detail="Question is required.")
-    return answer_question(payload)
+    return StreamingResponse(stream_answer(payload), media_type="application/x-ndjson")

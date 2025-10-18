@@ -96,6 +96,7 @@ function appendMessage(role, content) {
   bubble.textContent = content;
   container.appendChild(bubble);
   container.scrollTop = container.scrollHeight;
+  return bubble;
 }
 
 function renderReferences(citations) {
@@ -136,6 +137,7 @@ async function handleChat(event) {
   const form = event.target;
   const chatStatus = $("#chat-status");
   const textarea = form.querySelector("textarea[name='question']");
+  const sendButton = form.querySelector("button[type='submit']");
   const question = textarea.value.trim();
 
   if (!question) {
@@ -143,9 +145,51 @@ async function handleChat(event) {
   }
 
   appendMessage("user", question);
+  const assistantBubble = appendMessage("assistant", "");
   textarea.value = "";
   chatStatus.style.color = "";
   chatStatus.textContent = "Thinking...";
+  sendButton.disabled = true;
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let isDone = false;
+
+  const handleEvent = (payload) => {
+    switch (payload.type) {
+      case "delta": {
+        if (payload.content) {
+          assistantBubble.textContent += payload.content;
+          const container = $("#chat-messages");
+          container.scrollTop = container.scrollHeight;
+        }
+        break;
+      }
+      case "references": {
+        renderReferences(payload.citations);
+        break;
+      }
+      case "done": {
+        if (payload.answer) {
+          assistantBubble.textContent = payload.answer;
+        }
+        if (payload.citations) {
+          renderReferences(payload.citations);
+        }
+        chatStatus.textContent = "";
+        isDone = true;
+        break;
+      }
+      case "error": {
+        chatStatus.style.color = "#dc2626";
+        chatStatus.textContent = payload.message || "An error occurred while streaming the answer.";
+        isDone = true;
+        break;
+      }
+      default:
+        break;
+    }
+  };
 
   try {
     const response = await fetch("/api/chat", {
@@ -154,16 +198,63 @@ async function handleChat(event) {
       body: JSON.stringify({ question }),
     });
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Chat request failed");
+      const bodyText = await response.text();
+      let message = "Chat request failed";
+      if (bodyText) {
+        try {
+          const errorPayload = JSON.parse(bodyText);
+          message = errorPayload?.detail || message;
+        } catch (parseErr) {
+          message = bodyText;
+        }
+      }
+      throw new Error(message);
     }
-    const payload = await response.json();
-    appendMessage("assistant", payload.answer || "No answer provided.");
-    renderReferences(payload.citations);
-    chatStatus.textContent = "";
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("Streaming not supported in this browser.");
+    }
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) {
+          continue;
+        }
+        try {
+          const payload = JSON.parse(line);
+          handleEvent(payload);
+        } catch (parseError) {
+          console.error("Failed to parse stream chunk", parseError);
+        }
+      }
+      if (isDone) {
+        await reader.cancel();
+        break;
+      }
+    }
+    if (buffer.trim()) {
+      try {
+        const payload = JSON.parse(buffer.trim());
+        handleEvent(payload);
+      } catch (parseError) {
+        console.error("Failed to parse trailing stream chunk", parseError);
+      }
+    }
   } catch (err) {
     chatStatus.style.color = "#dc2626";
-    chatStatus.textContent = err.message;
+    chatStatus.textContent = err instanceof Error ? err.message : "Chat request failed.";
+  } finally {
+    sendButton.disabled = false;
+    if (!isDone && chatStatus.textContent === "Thinking...") {
+      chatStatus.textContent = "";
+    }
   }
 }
 
