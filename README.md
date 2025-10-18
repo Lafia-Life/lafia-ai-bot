@@ -119,8 +119,7 @@ The included `docker-compose.yml` supports both remote and local LLM setups:
 
    ```bash
    cp .env.example .env
-   # Set USE_REMOTE_MODEL=yes to stay with OpenAI-compatible providers
-   # Set USE_REMOTE_MODEL=no to rely on Ollama (no API key required)
+    # edit .env with the provider you want to use
    ```
 
 2. **Choose a mode**
@@ -128,15 +127,14 @@ The included `docker-compose.yml` supports both remote and local LLM setups:
    - Remote (e.g. OpenAI/DeepSeek):
 
      ```bash
-     export USE_REMOTE_MODEL=yes
      docker compose up --build
      ```
 
    - Local Ollama:
 
      ```bash
-     export USE_REMOTE_MODEL=no
-     export OLLAMA_MODEL=llama3        # or phi3, mistral, etc.
+       export OLLAMA_MODEL=llama3        # or phi3, mistral, etc.
+       # ensure .env points OPENAI_BASE_URL to http://ollama:11434/v1 and sets CHAT_MODEL/EMBEDDING_BACKEND
      docker compose --profile local-llm up --build
      ```
 
