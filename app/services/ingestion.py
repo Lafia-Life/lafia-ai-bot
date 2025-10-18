@@ -82,7 +82,7 @@ def _build_chunk_payload(
                     "page_start": page_number,
                     "page_end": page_number,
                     "chunk": local_index,
-                    "url": None,
+                    "url": "",
                     "source_type": "pdf",
                 }
             )
