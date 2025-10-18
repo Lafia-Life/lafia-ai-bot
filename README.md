@@ -110,35 +110,46 @@ Minimal FastAPI application that lets you upload PDF documents, index them with 
 
 ## Run App + Ollama with Docker Compose
 
-The included `docker-compose.yml` launches both the PDF chat app and an Ollama service that automatically pulls a local model (defaults to `llama3`).
+The included `docker-compose.yml` supports both remote and local LLM setups:
+
+- **Remote (default)** – skips Ollama entirely and uses whatever API settings you supply in `.env`.
+- **Local** – runs Ollama via a compose profile so the app can stay offline.
 
 1. **Set up environment**
 
    ```bash
    cp .env.example .env
-   # update values as needed (no API key required for Ollama, but OPENAI_API_KEY must be non-empty)
+   # Set USE_REMOTE_MODEL=yes to stay with OpenAI-compatible providers
+   # Set USE_REMOTE_MODEL=no to rely on Ollama (no API key required)
    ```
 
-2. **Pick an Ollama model (optional)**
+2. **Choose a mode**
 
-   By default, the compose file pulls `llama3`. Override this by exporting `OLLAMA_MODEL` when you run docker compose, e.g. `OLLAMA_MODEL=phi3`.
+   - Remote (e.g. OpenAI/DeepSeek):
 
-3. **Build and start both services**
+     ```bash
+     export USE_REMOTE_MODEL=yes
+     docker compose up --build
+     ```
 
-   ```bash
-   docker compose up --build
-   ```
+   - Local Ollama:
 
-   The first startup downloads the Ollama model (can be several GB). Subsequent runs reuse the `ollama_data` volume.
+     ```bash
+     export USE_REMOTE_MODEL=no
+     export OLLAMA_MODEL=llama3        # or phi3, mistral, etc.
+     docker compose --profile local-llm up --build
+     ```
 
-4. **Access the UI**
+     The first run pulls the selected Ollama model (several GB). Subsequent runs reuse the retained `ollama_data` volume.
+
+3. **Access the UI**
 
    - Chat: [http://127.0.0.1:8000](http://127.0.0.1:8000)
    - Upload management: [http://127.0.0.1:8000/upload](http://127.0.0.1:8000/upload)
 
-5. **Stop the stack**
+4. **Stop the stack**
 
-   Use `Ctrl+C`, or run `docker compose down` to stop and clean up containers. Volumes remain unless you add `--volumes`.
+   Use `Ctrl+C`, or run `docker compose down`. Append `--profile local-llm` if you started Ollama and want to stop just that profile. Add `--volumes` to remove stored embeddings/uploads/models.
 
 ---
 
