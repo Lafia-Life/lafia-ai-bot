@@ -7,29 +7,61 @@
     <link rel="stylesheet" href="/static/css/styles.css" />
   </head>
   <body>
-    <main>
-      <section class="upload">
-        <h1>PDF Chat Assistant</h1>
-        <form id="upload-form">
-          <label for="file-input">Upload PDF</label>
-          <input id="file-input" name="file" type="file" accept="application/pdf" required />
-          <button type="submit">Upload</button>
-        </form>
-        <div id="upload-status" class="status" role="status"></div>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark">📄</span>
+          <h1>PDF Chat Assistant</h1>
+        </div>
+        <nav class="app-nav">
+          <button id="nav-upload" class="nav-button" type="button">Upload</button>
+          <button id="nav-chat" class="nav-button" type="button">Chat</button>
+        </nav>
+      </header>
+
+      <section id="upload-view" class="view">
+        <div class="panel">
+          <h2>Upload PDFs</h2>
+          <p class="panel-description">Add the documents you want to ask questions about. We'll index them for lightning-fast answers.</p>
+          <form id="upload-form" class="upload-form">
+            <input id="file-input" name="file" type="file" accept="application/pdf" required />
+            <button type="submit">Upload PDF</button>
+          </form>
+          <div id="upload-status" class="status" role="status"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Indexed Documents</h3>
+            <button id="start-chat" class="secondary" type="button">Open Chat</button>
+          </div>
+          <ul id="document-list" class="document-list"></ul>
+        </div>
       </section>
 
-      <section class="documents">
-        <h2>Indexed Documents</h2>
-        <ul id="document-list"></ul>
-      </section>
-
-      <section class="chat">
-        <h2>Ask a Question</h2>
-        <form id="chat-form">
-          <textarea id="question" name="question" rows="4" placeholder="Ask about the indexed PDFs..." required></textarea>
-          <button type="submit">Send</button>
-        </form>
-        <div id="chat-response"></div>
+      <section id="chat-view" class="view hidden">
+        <div class="chat-layout">
+          <aside class="reference-panel">
+            <div class="panel-header">
+              <h2>Document References</h2>
+              <p class="panel-subtitle">Preview the passages backing each answer.</p>
+            </div>
+            <div id="reference-list" class="reference-list"></div>
+          </aside>
+          <section class="conversation-panel">
+            <div id="chat-messages" class="messages"></div>
+            <form id="chat-form" class="chat-form">
+              <label class="sr-only" for="question">Ask a question</label>
+              <div class="chat-input">
+                <textarea id="question" name="question" rows="3" placeholder="Ask about your documents..." required></textarea>
+                <div class="chat-actions">
+                  <button type="submit">Send</button>
+                </div>
+              </div>
+              <p id="chat-status" class="status" role="status"></p>
+            </form>
+          </section>
+        </div>
       </section>
     </main>
 

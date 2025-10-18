@@ -42,6 +42,9 @@ def _to_citations(results: List[dict]) -> List[Citation]:
         metadata = item["metadata"]
         distance = float(item.get("distance", 0.0))
         similarity = max(0.0, 1.0 - distance)
+        excerpt = item.get("text", "").strip()
+        if excerpt and len(excerpt) > 400:
+            excerpt = excerpt[:397].rstrip() + "..."
         citations.append(
             Citation(
                 document_id=metadata["document_id"],
@@ -49,6 +52,7 @@ def _to_citations(results: List[dict]) -> List[Citation]:
                 page_start=metadata["page_start"],
                 page_end=metadata["page_end"],
                 score=round(similarity, 4),
+                excerpt=excerpt,
             )
         )
     return citations

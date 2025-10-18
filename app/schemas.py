@@ -25,6 +25,7 @@ class Citation(BaseModel):
     page_start: int
     page_end: int
     score: float
+    excerpt: str
 
 
 class ChatResponse(BaseModel):
