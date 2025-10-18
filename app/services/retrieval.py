@@ -181,15 +181,24 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
         emitted_delta = False
         for chunk in answer_chunks:
             if not chunk:
-                continue
-            emitted_delta = True
-            yield _encode_event({"type": "delta", "content": chunk})
-
-        cached_answer: str = cached.get("answer", "")
-        if not emitted_delta and cached_answer:
             yield _encode_event({"type": "delta", "content": cached_answer})
 
         yield _encode_event(
+    text_attr = getattr(value, "text", None)
+    if text_attr:
+        return _coerce_text(text_attr)
+    content_attr = getattr(value, "content", None)
+    if content_attr:
+        return _coerce_text(content_attr)
+    if hasattr(value, "model_dump"):
+        try:
+            dumped = value.model_dump()
+            return _coerce_text(dumped)
+        except Exception:  # noqa: BLE001
+            pass
+    if isinstance(value, Iterable):
+        parts = [_coerce_text(item) for item in value if item is not None]
+        return "".join(part for part in parts if part)
             {
                 "type": "done",
                 "answer": cached_answer,
