@@ -67,28 +67,29 @@ def _build_chunk_payload(
     chunk_overlap: int,
 ) -> Tuple[List[str], List[dict], List[str]]:
     texts: List[str] = []
-    chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    texts: List[str] = []
     metadatas: List[dict] = []
     ids: List[str] = []
 
-    for index, chunk in enumerate(chunks):
-        chunk_id = f"{document_id}_web_{index}"
-        texts.append(chunk)
-        metadatas.append(
-            {
-                "document_id": document_id,
-                "filename": title,
-                "page_start": index + 1,
-                "page_end": index + 1,
-                "chunk": index,
-                "url": url,
-                "source_type": "web",
-            }
-        )
-        ids.append(chunk_id)
-
+    for page_number, text in pages:
+        page_chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        for local_index, chunk in enumerate(page_chunks):
+            chunk_id = f"{document_id}_{page_number}_{local_index}"
+            texts.append(chunk)
+            metadatas.append(
+                {
+                    "document_id": document_id,
+                    "filename": filename,
+                    "page_start": page_number,
+                    "page_end": page_number,
+                    "chunk": local_index,
+                    "url": "",
+                    "source_type": "pdf",
+                }
+            )
+            ids.append(chunk_id)
     return texts, metadatas, ids
+
+
 def _fetch_web_content(url: str) -> Tuple[str, str]:
     settings = get_settings()
     headers = {
@@ -110,7 +111,7 @@ def _fetch_web_content(url: str) -> Tuple[str, str]:
             timeout=settings.scraper_timeout,
             follow_redirects=True,
             headers=headers,
-            http2=True,
+            http2=settings.scraper_enable_http2,
             proxies=proxies,
         ) as client:
             response = client.get(url)
@@ -159,18 +160,35 @@ def _build_web_chunk_payload(
     texts: List[str] = []
     metadatas: List[dict] = []
     ids: List[str] = []
-        try:
-            with httpx.Client(
-                timeout=settings.scraper_timeout,
-                follow_redirects=True,
-                headers=headers,
-                http2=True,
-                proxies=proxies,
-            ) as client:
-                response = client.get(url)
-                response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
- 
+
+    for index, chunk in enumerate(chunks):
+        chunk_id = f"{document_id}_web_{index}"
+        texts.append(chunk)
+        metadatas.append(
+            {
+                "document_id": document_id,
+                "filename": title,
+                "page_start": index + 1,
+                "page_end": index + 1,
+                "chunk": index,
+                "url": url,
+                "source_type": "web",
+            }
+        )
+        ids.append(chunk_id)
+
+    return texts, metadatas, ids
+
+
+def ingest_document(upload_bytes: bytes, filename: str) -> UploadResponse:
+    settings: Settings = get_settings()
+    document_store = DocumentStore(settings.chroma_path)
+    collection = get_collection()
+
+    document_id = str(uuid.uuid4())
+    saved_path = _save_upload(upload_bytes, filename, settings.uploads_path, document_id)
+
+    pages = _extract_pages(saved_path)
     texts, metadatas, ids = _build_chunk_payload(
         document_id=document_id,
         filename=filename,

@@ -29,6 +29,13 @@ def _resolve_openai_base_url() -> Optional[str]:
     )
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Settings(BaseModel):
     openai_api_key: Optional[str] = Field(default_factory=_resolve_openai_key)
     openai_base_url: Optional[str] = Field(default_factory=_resolve_openai_base_url)
@@ -54,6 +61,7 @@ class Settings(BaseModel):
     )
     scraper_timeout: float = Field(default_factory=lambda: float(os.getenv("SCRAPER_TIMEOUT", "20")))
     scraper_proxy_url: Optional[str] = Field(default_factory=lambda: os.getenv("SCRAPER_PROXY_URL"))
+    scraper_enable_http2: bool = Field(default_factory=lambda: _env_flag("SCRAPER_HTTP2", False))
 
     class Config:
         arbitrary_types_allowed = True
