@@ -1,5 +1,7 @@
 import json
-from typing import Generator, List
+from collections import OrderedDict
+from threading import Lock
+from typing import Generator, List, Optional, Tuple
 
 from fastapi.encoders import jsonable_encoder
 
@@ -7,6 +9,38 @@ from app.config import Settings, get_openai_client, get_settings
 from app.schemas import ChatRequest, ChatResponse, Citation
 from app.services.embeddings import embed_query
 from app.services.vectorstore import get_collection, query_collection
+
+
+class AnswerCache:
+    def __init__(self, max_items: int = 32) -> None:
+        self.max_items = max_items
+        self._entries: "OrderedDict[str, dict]" = OrderedDict()
+        self._lock = Lock()
+
+    def get(self, key: str) -> Optional[dict]:
+        with self._lock:
+            if key not in self._entries:
+                return None
+            value = self._entries.pop(key)
+            self._entries[key] = value
+            return value
+
+    def set(self, key: str, value: dict) -> None:
+        with self._lock:
+            if key in self._entries:
+                self._entries.pop(key)
+            self._entries[key] = value
+            while len(self._entries) > self.max_items:
+                self._entries.popitem(last=False)
+
+
+def _normalize_question(question: str) -> str:
+    return question.strip().lower()
+
+
+_answer_cache = AnswerCache()
+
+_NO_CONTEXT_MESSAGE = "I could not find the answer in the uploaded documents."
 
 
 def _format_context(results: List[dict]) -> str:
@@ -97,6 +131,35 @@ def _encode_event(payload: dict) -> bytes:
 
 
 def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
+    question_key = _normalize_question(payload.question)
+    cached = _answer_cache.get(question_key)
+
+    if cached is not None:
+        citations = cached.get("citations", [])
+        if citations:
+            yield _encode_event({"type": "references", "citations": citations})
+
+        answer_chunks: Tuple[str, ...] = tuple(cached.get("answer_chunks", ()))
+        emitted_delta = False
+        for chunk in answer_chunks:
+            if not chunk:
+                continue
+            emitted_delta = True
+            yield _encode_event({"type": "delta", "content": chunk})
+
+        cached_answer: str = cached.get("answer", "")
+        if not emitted_delta and cached_answer:
+            yield _encode_event({"type": "delta", "content": cached_answer})
+
+        yield _encode_event(
+            {
+                "type": "done",
+                "answer": cached_answer,
+                "citations": citations,
+            }
+        )
+        return
+
     settings: Settings = get_settings()
     client = get_openai_client(settings)
     collection = get_collection()
@@ -105,17 +168,26 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
     raw_results = query_collection(collection=collection, embedding=embedding, n_results=4)
 
     if not raw_results:
+        _answer_cache.set(
+            question_key,
+            {
+                "answer": _NO_CONTEXT_MESSAGE,
+                "answer_chunks": (_NO_CONTEXT_MESSAGE,),
+                "citations": [],
+            },
+        )
         yield _encode_event(
             {
                 "type": "done",
-                "answer": "I could not find the answer in the uploaded documents.",
+                "answer": _NO_CONTEXT_MESSAGE,
                 "citations": [],
             }
         )
         return
 
     citations = _to_citations(raw_results)
-    yield _encode_event({"type": "references", "citations": citations})
+    if citations:
+        yield _encode_event({"type": "references", "citations": citations})
 
     context = _format_context(raw_results)
     messages = _build_prompt(payload.question, context)
@@ -151,4 +223,13 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
             "answer": answer_text,
             "citations": citations,
         }
+    )
+
+    _answer_cache.set(
+        question_key,
+        {
+            "answer": answer_text,
+            "answer_chunks": tuple(answer_parts),
+            "citations": citations,
+        },
     )
