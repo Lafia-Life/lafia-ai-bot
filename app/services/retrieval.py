@@ -1,7 +1,7 @@
 import json
 from collections import OrderedDict
 from threading import Lock
-from typing import Generator, List, Optional, Tuple
+from typing import Generator, Iterable, List, Optional, Tuple
 
 from fastapi.encoders import jsonable_encoder
 
@@ -41,6 +41,31 @@ def _normalize_question(question: str) -> str:
 _answer_cache = AnswerCache()
 
 _NO_CONTEXT_MESSAGE = "I could not find the answer in the uploaded documents."
+
+
+def _coerce_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            return value.decode("utf-8")
+        except Exception:  # noqa: BLE001
+            return ""
+    if isinstance(value, dict):
+        text = value.get("text") or value.get("content")
+        return _coerce_text(text)
+    if isinstance(value, Iterable):
+        parts = [_coerce_text(item) for item in value]
+        return "".join(part for part in parts if part)
+    text = getattr(value, "text", None)
+    if text:
+        return _coerce_text(text)
+    content = getattr(value, "content", None)
+    if content:
+        return _coerce_text(content)
+    return ""
 
 
 def _format_context(results: List[dict]) -> str:
@@ -131,7 +156,7 @@ def answer_question(payload: ChatRequest) -> ChatResponse:
         temperature=0.2,
     )
 
-    answer_text = chat_completion.choices[0].message.content.strip()
+    answer_text = _coerce_text(chat_completion.choices[0].message.content).strip()
 
     return ChatResponse(
         answer=answer_text,
@@ -220,7 +245,7 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
                 delta = getattr(choice, "delta", None)
                 if not delta:
                     continue
-                content = getattr(delta, "content", None)
+                content = _coerce_text(delta)
                 if not content:
                     continue
                 answer_parts.append(content)
