@@ -1,5 +1,7 @@
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -19,6 +21,18 @@ templates = Jinja2Templates(directory="templates")
 
 def get_document_store() -> DocumentStore:
     return DocumentStore(settings.chroma_path)
+
+
+def _resolve_document_path(document_id: str, store: DocumentStore) -> tuple[DocumentSummary, Path]:
+    summary = store.get(document_id)
+    if summary is None or summary.source_type != "pdf":
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    matches = sorted(settings.uploads_path.glob(f"{document_id}_*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Stored PDF could not be located.")
+
+    return summary, matches[0]
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -67,3 +81,16 @@ def chat(payload: ChatRequest) -> StreamingResponse:
     if not payload.question.strip():
         raise HTTPException(status_code=400, detail="Question is required.")
     return StreamingResponse(stream_answer(payload), media_type="application/x-ndjson")
+
+
+@app.get("/documents/{document_id}/download")
+def download_document(document_id: str, store: DocumentStore = Depends(get_document_store)) -> FileResponse:
+    summary, file_path = _resolve_document_path(document_id, store)
+    return FileResponse(file_path, media_type="application/pdf", filename=summary.filename)
+
+
+@app.get("/documents/{document_id}/inline")
+def inline_document(document_id: str, store: DocumentStore = Depends(get_document_store)) -> FileResponse:
+    summary, file_path = _resolve_document_path(document_id, store)
+    headers = {"Content-Disposition": f'inline; filename="{summary.filename}"'}
+    return FileResponse(file_path, media_type="application/pdf", headers=headers)

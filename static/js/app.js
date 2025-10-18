@@ -1,5 +1,6 @@
 const state = {
   documents: [],
+  activePreview: null,
 };
 
 const THINKING_FRAMES = ["Thinking", "Thinking.", "Thinking..", "Thinking..."];
@@ -25,6 +26,72 @@ function stopThinkingAnimation(bubble) {
     window.clearInterval(Number(timerId));
     delete bubble.dataset.thinkingTimer;
   }
+}
+
+function setModalOpen(isOpen) {
+  document.body.classList.toggle("modal-open", Boolean(isOpen));
+}
+
+function clearPreviewUI() {
+  const modal = $("#reference-modal");
+  const frame = $("#reference-modal-frame");
+  const title = $("#reference-modal-title");
+  const action = $("#reference-modal-open");
+
+  if (frame) {
+    frame.src = "";
+  }
+  if (title) {
+    title.textContent = "Document preview";
+  }
+  if (action) {
+    action.classList.add("hidden");
+    action.removeAttribute("href");
+  }
+  if (modal) {
+    modal.classList.add("hidden");
+  }
+  setModalOpen(false);
+  document.querySelectorAll(".reference-card.active").forEach((node) => {
+    node.classList.remove("active");
+  });
+}
+
+function showPdfPreview(citation, card) {
+  const modal = $("#reference-modal");
+  const frame = $("#reference-modal-frame");
+  const title = $("#reference-modal-title");
+  const action = $("#reference-modal-open");
+
+  if (!modal || !frame || !title) {
+    return;
+  }
+
+  document.querySelectorAll(".reference-card.active").forEach((node) => {
+    node.classList.remove("active");
+  });
+  card.classList.add("active");
+
+  const inlineUrl = `/documents/${citation.document_id}/inline#page=${citation.page_start}`;
+  frame.src = inlineUrl;
+  title.textContent = `${citation.filename} · page ${citation.page_start}`;
+  if (action) {
+    action.href = `/documents/${citation.document_id}/download`;
+    action.classList.remove("hidden");
+  }
+  modal.classList.remove("hidden");
+  setModalOpen(true);
+  const closeButton = $("#reference-modal-close");
+  closeButton?.focus();
+  state.activePreview = {
+    documentId: citation.document_id,
+    pageStart: citation.page_start,
+  };
+}
+
+function closePreviewModal() {
+  clearPreviewUI();
+  state.activePreview = null;
 }
 
 function renderDocuments(documents) {
@@ -127,6 +194,8 @@ function renderReferences(citations) {
   if (!list) {
     return;
   }
+  const previousPreview = state.activePreview;
+  clearPreviewUI();
   list.innerHTML = "";
 
   if (!citations || citations.length === 0) {
@@ -134,12 +203,16 @@ function renderReferences(citations) {
     empty.className = "reference-placeholder";
     empty.textContent = "No supporting references found yet.";
     list.appendChild(empty);
+    state.activePreview = null;
     return;
   }
+
+  const pdfEntries = new Map();
 
   for (const citation of citations) {
     const card = document.createElement("article");
     card.className = "reference-card";
+    card.dataset.type = citation.source_type;
 
     const title = document.createElement("h4");
     title.textContent = citation.filename;
@@ -158,17 +231,53 @@ function renderReferences(citations) {
 
     card.append(title, meta, excerpt);
 
-    if (citation.url) {
+    if (citation.source_type === "pdf") {
+      card.setAttribute("role", "button");
+      card.tabIndex = 0;
+      card.setAttribute(
+        "aria-label",
+        `Preview ${citation.filename} page ${citation.page_start}`,
+      );
+
+      const hint = document.createElement("p");
+      hint.className = "reference-hint";
+      hint.textContent = "Click to preview this PDF section.";
+      card.appendChild(hint);
+
+      const select = () => showPdfPreview(citation, card);
+      card.addEventListener("click", select);
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          select();
+        }
+      });
+
+      const key = `${citation.document_id}:${citation.page_start}`;
+      if (!pdfEntries.has(key)) {
+        pdfEntries.set(key, select);
+      }
+    } else if (citation.url) {
       const link = document.createElement("a");
       link.className = "reference-link";
       link.href = citation.url;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
-      link.textContent = citation.url;
+      link.textContent = "Open source";
       card.appendChild(link);
     }
 
     list.appendChild(card);
+  }
+
+  if (previousPreview) {
+    const key = `${previousPreview.documentId}:${previousPreview.pageStart}`;
+    const select = pdfEntries.get(key);
+    if (select) {
+      select();
+    } else {
+      state.activePreview = null;
+    }
   }
 }
 
@@ -230,6 +339,17 @@ async function handleChat(event) {
   }
 
   appendMessage("user", question);
+  state.activePreview = null;
+  clearPreviewUI();
+  const referenceList = $("#reference-list");
+  if (referenceList) {
+    referenceList.innerHTML = "";
+    const loading = document.createElement("p");
+    loading.className = "reference-placeholder";
+    loading.textContent = "Searching supporting passages...";
+    referenceList.appendChild(loading);
+  }
+
   const assistantBubble = appendMessage("assistant", "Thinking...");
   assistantBubble.dataset.placeholder = "true";
   startThinkingAnimation(assistantBubble);
@@ -384,6 +504,8 @@ window.addEventListener("DOMContentLoaded", () => {
   const chatForm = $("#chat-form");
   const referenceList = $("#reference-list");
   const scrapeForm = $("#scrape-form");
+  const referenceModal = $("#reference-modal");
+  const modalClose = $("#reference-modal-close");
 
   if (uploadForm) {
     uploadForm.addEventListener("submit", handleUpload);
@@ -395,6 +517,23 @@ window.addEventListener("DOMContentLoaded", () => {
 
   if (chatForm) {
     chatForm.addEventListener("submit", handleChat);
+  }
+
+  if (modalClose) {
+    modalClose.addEventListener("click", closePreviewModal);
+  }
+
+  if (referenceModal) {
+    referenceModal.addEventListener("click", (event) => {
+      if (event.target === referenceModal) {
+        closePreviewModal();
+      }
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !referenceModal.classList.contains("hidden")) {
+        closePreviewModal();
+      }
+    });
   }
 
   if (referenceList) {

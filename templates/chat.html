@@ -45,5 +45,18 @@
     </main>
 
     <script src="/static/js/app.js?v=20251018" defer></script>
+
+    <div id="reference-modal" class="reference-modal hidden" role="dialog" aria-modal="true" aria-labelledby="reference-modal-title">
+      <div class="reference-modal-dialog">
+        <header class="reference-modal-header">
+          <h3 id="reference-modal-title" class="reference-modal-title">Document preview</h3>
+          <div class="reference-modal-actions">
+            <a id="reference-modal-open" class="reference-link hidden" target="_blank" rel="noopener noreferrer">Open full PDF</a>
+            <button type="button" id="reference-modal-close" class="modal-close" aria-label="Close preview">×</button>
+          </div>
+        </header>
+        <iframe id="reference-modal-frame" title="PDF preview" class="reference-modal-frame"></iframe>
+      </div>
+    </div>
   </body>
 </html>

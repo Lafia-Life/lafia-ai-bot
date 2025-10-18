@@ -6,6 +6,10 @@ body {
   color: #1f2933;
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
 .app-shell {
   max-width: 1280px;
   margin: 0 auto;
@@ -292,6 +296,7 @@ button.secondary:hover:not([disabled]) {
   margin: 0;
 }
 
+
 .reference-card {
   border: 1px solid #dbeafe;
   border-radius: 14px;
@@ -299,6 +304,21 @@ button.secondary:hover:not([disabled]) {
   background: #f8fbff;
   display: grid;
   gap: 0.5rem;
+}
+
+.reference-card[data-type="pdf"] {
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.reference-card[data-type="pdf"]:hover {
+  border-color: #93c5fd;
+  background: #ecf2ff;
+}
+
+.reference-card.active {
+  border-color: #2563eb;
+  background: #e0ecff;
 }
 
 .reference-card h4 {
@@ -331,6 +351,78 @@ button.secondary:hover:not([disabled]) {
 
 .reference-link:hover {
   text-decoration: none;
+}
+
+.reference-hint {
+  font-size: 0.8rem;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.reference-modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 2rem;
+  z-index: 1000;
+}
+
+.reference-modal.hidden {
+  display: none;
+}
+
+.reference-modal-dialog {
+  width: min(960px, 100%);
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.25);
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.reference-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.reference-modal-title {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #111827;
+}
+
+.reference-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.modal-close {
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #1f2937;
+  padding: 0.25rem 0.5rem;
+}
+
+.modal-close:hover {
+  color: #ef4444;
+}
+
+.reference-modal-frame {
+  width: 100%;
+  height: 70vh;
+  min-height: 320px;
+  border: none;
+  border-radius: 12px;
+  background: #f8fafc;
 }
 
 .messages {
