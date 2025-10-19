@@ -14,6 +14,7 @@ RUN apt-get update \
         libglib2.0-0 \
         libgl1 \
         libmagic1 \
+        tesseract-ocr \
         poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 

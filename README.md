@@ -1,6 +1,6 @@
 # PDF Chat Assistant MVP
 
-Minimal FastAPI application that lets you upload PDF documents, index them with OpenAI-compatible (or local) embeddings + Chroma, and ask streaming questions with source citations.
+Minimal FastAPI application that lets you upload PDF documents (and now images with OCR), index them with OpenAI-compatible (or local) embeddings + Chroma, and ask streaming questions with source citations.
 
 ---
 
@@ -9,6 +9,7 @@ Minimal FastAPI application that lets you upload PDF documents, index them with 
 - Python 3.11+
 - `git`
 - An OpenAI-compatible API key (OpenAI, DeepSeek, etc.) if you want cloud completions. Without a key, the server can still ingest PDFs but cannot generate answers.
+- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed locally if you plan to ingest images outside Docker.
 
 ---
 
@@ -153,7 +154,7 @@ The included `docker-compose.yml` supports both remote and local LLM setups:
 
 ## How It Works
 
-- **Upload**: PDFs are stored under `storage/uploads/`, parsed with `pypdf`, chunked into overlapping windows, and embedded via OpenAI or a local SentenceTransformers model.
+- **Upload**: PDFs are stored under `storage/uploads/`, parsed with `pypdf`, chunked into overlapping windows, and embedded via OpenAI or a local SentenceTransformers model. Image uploads (`.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp`, `.webp`) are OCR’d with Tesseract before chunking so scans and screenshots are searchable too.
 - **Web Scrape**: Fetches HTML with httpx + BeautifulSoup, strips boilerplate, chunks the cleaned article text, and stores citations with the original URL.
 - **Index**: Embeddings and metadata (document id, filename, page numbers) are persisted in a local Chroma collection under `storage/chroma/`.
 - **Chat**: A question is embedded, relevant chunks are retrieved, and the response is generated with the configured chat model. Answers stream back in real time, and citations include excerpts for quick preview.

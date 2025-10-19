@@ -124,6 +124,9 @@ function renderDocuments(documents) {
           meta.textContent = `Web · ${doc.url}`;
         }
       }
+    } else if (doc.source_type === "image") {
+      const frameLabel = doc.page_count > 1 ? `${doc.page_count} frames` : "1 frame";
+      meta.textContent = `Image · OCR extracted (${frameLabel})`;
     } else {
       meta.textContent = `PDF · ${doc.page_count} pages`;
     }
@@ -229,9 +232,16 @@ function renderReferences(citations) {
     const meta = document.createElement("p");
     meta.className = "reference-meta";
     const score = typeof citation.score === "number" ? citation.score.toFixed(2) : "n/a";
-    const location = citation.source_type === "web"
-      ? `Section ${citation.page_start}`
-      : `Pages ${citation.page_start}-${citation.page_end}`;
+    let location;
+    if (citation.source_type === "web") {
+      location = `Section ${citation.page_start}`;
+    } else if (citation.source_type === "image") {
+      location = citation.page_start === citation.page_end
+        ? `Image segment ${citation.page_start}`
+        : `Image segments ${citation.page_start}-${citation.page_end}`;
+    } else {
+      location = `Pages ${citation.page_start}-${citation.page_end}`;
+    }
     meta.textContent = `${location} · score ${score}`;
 
     const excerpt = document.createElement("p");
@@ -240,7 +250,7 @@ function renderReferences(citations) {
 
     card.append(title, meta, excerpt);
 
-    if (citation.source_type === "pdf") {
+  if (citation.source_type === "pdf") {
       card.setAttribute("role", "button");
       card.tabIndex = 0;
       card.setAttribute(
@@ -266,6 +276,11 @@ function renderReferences(citations) {
       if (!pdfEntries.has(key)) {
         pdfEntries.set(key, select);
       }
+    } else if (citation.source_type === "image") {
+      const hint = document.createElement("p");
+      hint.className = "reference-hint";
+      hint.textContent = "OCR text extracted from uploaded image.";
+      card.appendChild(hint);
     } else if (citation.url) {
       const link = document.createElement("a");
       link.className = "reference-link";

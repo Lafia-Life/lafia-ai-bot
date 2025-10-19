@@ -1,11 +1,14 @@
 import uuid
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
+from PIL import Image, UnidentifiedImageError
+import pytesseract
+from pytesseract import TesseractNotFoundError
 from pypdf import PdfReader
 
 from app.config import Settings, get_settings
@@ -13,6 +16,8 @@ from app.schemas import DocumentSummary, UploadResponse
 from app.services.document_store import DocumentStore
 from app.services.embeddings import embed_texts
 from app.services.vectorstore import get_collection, upsert_documents
+
+SUPPORTED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
 
 
 def _sanitize_filename(filename: str) -> str:
@@ -65,6 +70,7 @@ def _build_chunk_payload(
     pages: List[Tuple[int, str]],
     chunk_size: int,
     chunk_overlap: int,
+    source_type: str,
 ) -> Tuple[List[str], List[dict], List[str]]:
     texts: List[str] = []
     metadatas: List[dict] = []
@@ -83,11 +89,33 @@ def _build_chunk_payload(
                     "page_end": page_number,
                     "chunk": local_index,
                     "url": "",
-                    "source_type": "pdf",
+                    "source_type": source_type,
                 }
             )
             ids.append(chunk_id)
     return texts, metadatas, ids
+
+
+def _extract_image_pages(image_path: Path) -> List[Tuple[int, str]]:
+    pages: List[Tuple[int, str]] = []
+    try:
+        with Image.open(image_path) as image:
+            frame_count = getattr(image, "n_frames", 1)
+            for frame_index in range(frame_count):
+                if frame_count > 1:
+                    image.seek(frame_index)
+                frame = image.convert("RGB")
+                text = pytesseract.image_to_string(frame)
+                cleaned = " ".join(text.split())
+                if cleaned:
+                    pages.append((frame_index + 1, cleaned))
+    except UnidentifiedImageError as exc:
+        raise ValueError("Unsupported image format for OCR processing.") from exc
+    except TesseractNotFoundError as exc:
+        raise ValueError(
+            "Tesseract OCR is required to extract text from images. Install tesseract-ocr and retry."
+        ) from exc
+    return pages
 
 
 def _fetch_web_content(url: str) -> Tuple[str, str]:
@@ -180,7 +208,7 @@ def _build_web_chunk_payload(
     return texts, metadatas, ids
 
 
-def ingest_document(upload_bytes: bytes, filename: str) -> UploadResponse:
+def ingest_document(upload_bytes: bytes, filename: str, content_type: Optional[str] = None) -> UploadResponse:
     settings: Settings = get_settings()
     document_store = DocumentStore(settings.chroma_path)
     collection = get_collection()
@@ -188,17 +216,31 @@ def ingest_document(upload_bytes: bytes, filename: str) -> UploadResponse:
     document_id = str(uuid.uuid4())
     saved_path = _save_upload(upload_bytes, filename, settings.uploads_path, document_id)
 
-    pages = _extract_pages(saved_path)
+    suffix = saved_path.suffix.lower()
+    mime = (content_type or "").lower()
+    is_pdf = suffix == ".pdf" or mime == "application/pdf"
+    is_image = suffix in SUPPORTED_IMAGE_SUFFIXES or mime.startswith("image/")
+
+    if is_pdf:
+        pages = _extract_pages(saved_path)
+        source_type = "pdf"
+    elif is_image:
+        pages = _extract_image_pages(saved_path)
+        source_type = "image"
+    else:
+        raise ValueError("Unsupported file type. Upload a PDF or supported image format.")
+
     texts, metadatas, ids = _build_chunk_payload(
         document_id=document_id,
         filename=filename,
         pages=pages,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
+        source_type=source_type,
     )
 
     if not texts:
-        raise ValueError("Unable to extract text from the uploaded PDF.")
+        raise ValueError("Unable to extract text from the uploaded file.")
 
     embeddings = embed_texts(texts)
     upsert_documents(
@@ -214,7 +256,7 @@ def ingest_document(upload_bytes: bytes, filename: str) -> UploadResponse:
         document_id=document_id,
         filename=filename,
         page_count=len(pages),
-        source_type="pdf",
+        source_type=source_type,
         url=None,
     )
     document_store.upsert(summary)

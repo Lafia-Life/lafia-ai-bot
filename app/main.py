@@ -59,7 +59,11 @@ def upload_document(
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    response = ingest_document(upload_bytes=contents, filename=file.filename)
+    response = ingest_document(
+        upload_bytes=contents,
+        filename=file.filename,
+        content_type=file.content_type,
+    )
     return response
 
 
