@@ -1,0 +1,276 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+.mod-chatlearning {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1f2933;
+}
+
+.mod-chatlearning .hidden {
+  display: none !important;
+}
+
+.mod-chatlearning .app-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+  display: grid;
+  gap: 2rem;
+}
+
+.mod-chatlearning .panel {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 1.75rem;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 1.25rem;
+}
+
+.mod-chatlearning .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.mod-chatlearning .panel-description {
+  margin: 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.mod-chatlearning button {
+  padding: 0.65rem 1.25rem;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  background: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mod-chatlearning button:hover:not([disabled]) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.26);
+}
+
+.mod-chatlearning button.secondary {
+  background: transparent;
+  color: #2563eb;
+  border: 1px solid #93c5fd;
+}
+
+.mod-chatlearning button.secondary:hover:not([disabled]) {
+  background: #e0ecff;
+}
+
+.mod-chatlearning .status {
+  min-height: 1.5rem;
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.mod-chatlearning input[type="file"],
+.mod-chatlearning textarea,
+.mod-chatlearning input[type="url"] {
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  font-size: 0.95rem;
+  background: #ffffff;
+  color: inherit;
+}
+
+.mod-chatlearning textarea {
+  resize: none;
+}
+
+.mod-chatlearning .document-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.mod-chatlearning .document-list li {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.mod-chatlearning .document-meta {
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.mod-chatlearning .chat-layout {
+  display: grid;
+  grid-template-columns: 7fr 3fr;
+  gap: 1.75rem;
+}
+
+.mod-chatlearning .conversation-panel,
+.mod-chatlearning .reference-panel {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 1.75rem;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.mod-chatlearning .chat-bubbles {
+  display: grid;
+  gap: 1rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.mod-chatlearning .chat-bubble {
+  border-radius: 16px;
+  padding: 0.85rem 1rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
+.mod-chatlearning .chat-bubble.user {
+  background: #f1f5f9;
+  justify-self: end;
+}
+
+.mod-chatlearning .chat-bubble.assistant {
+  background: #2563eb;
+  color: #ffffff;
+  justify-self: start;
+}
+
+.mod-chatlearning .reference-list {
+  display: grid;
+  gap: 1rem;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.mod-chatlearning .reference-card {
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  padding: 1rem;
+  background: #f8fbff;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mod-chatlearning .reference-card[data-type="pdf"] {
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.mod-chatlearning .reference-card[data-type="pdf"]:hover {
+  border-color: #93c5fd;
+  background: #ecf2ff;
+}
+
+.mod-chatlearning .reference-card.active {
+  border-color: #2563eb;
+  background: #e0ecff;
+}
+
+.mod-chatlearning .reference-meta {
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.mod-chatlearning .reference-excerpt {
+  font-size: 0.95rem;
+  color: #334155;
+  line-height: 1.6;
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+}
+
+.mod-chatlearning .reference-link {
+  font-size: 0.85rem;
+  color: #1d4ed8;
+  text-decoration: underline;
+  word-break: break-word;
+}
+
+.mod-chatlearning .reference-link:hover {
+  text-decoration: none;
+}
+
+.mod-chatlearning .upload-form,
+.mod-chatlearning .scrape-form,
+.mod-chatlearning .chat-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.mod-chatlearning .chat-form textarea {
+  flex: 1 1 320px;
+}
+
+.mod-chatlearning .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 1000;
+  display: none;
+}
+
+.mod-chatlearning .modal-backdrop.active {
+  display: block;
+}
+
+.mod-chatlearning .modal-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(960px, 100%);
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.25);
+  display: none;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem 1.5rem;
+  z-index: 1001;
+}
+
+.mod-chatlearning .modal-dialog.active {
+  display: flex;
+}
+
+.mod-chatlearning .modal-iframe {
+  width: 100%;
+  height: 70vh;
+  border: none;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+@media (max-width: 1024px) {
+  .mod-chatlearning .chat-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .mod-chatlearning .chat-bubbles,
+  .mod-chatlearning .reference-list {
+    max-height: none;
+  }
+}

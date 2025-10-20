@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<XMLDB PATH="mod/chatlearning/db" VERSION="20241020" COMMENT="ChatLearning module" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <TABLES>
+    <TABLE NAME="chatlearning" COMMENT="ChatLearning activity instances">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="course" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="Course"/>
+        <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" DEFAULT="" COMMENT="Activity name"/>
+        <FIELD NAME="intro" TYPE="text" LENGTH="big" NOTNULL="false" COMMENT="Intro content"/>
+        <FIELD NAME="introformat" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" COMMENT="Intro format"/>
+        <FIELD NAME="contextprompt" TYPE="text" LENGTH="medium" NOTNULL="false" COMMENT="System prompt"/>
+        <FIELD NAME="allowuploads" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" COMMENT="Allow uploads flag"/>
+        <FIELD NAME="allowedmimetypes" TYPE="char" LENGTH="255" NOTNULL="false" COMMENT="Allowed MIME types"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="Creation time"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="Modification time"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="course_ix" UNIQUE="false" FIELDS="course"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="chatlearning_sessions" COMMENT="Active sessions mapped to backend conversations">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="chatlearningid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="ChatLearning instance"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="Course id"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="User id"/>
+        <FIELD NAME="conversationid" TYPE="char" LENGTH="100" NOTNULL="false" COMMENT="Conversation id returned by backend"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="Created time"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="conversation_lookup_ix" UNIQUE="false" FIELDS="chatlearningid,userid"/>
+      </INDEXES>
+    </TABLE>
+  </TABLES>
+</XMLDB>
