@@ -2,6 +2,8 @@
 
 Minimal FastAPI application that lets you upload PDF documents (and now images with OCR), index them with OpenAI-compatible (or local) embeddings + Chroma, and ask streaming questions with source citations.
 
+**🆕 SMS Integration for Rural Access**: Now includes SMS-based AI assistance for users in rural areas without internet access, specifically optimized for Uganda using Africa's Talking SMS gateway. [See SMS Setup Guide →](SMS_SETUP_UGANDA.md)
+
 ---
 
 ## Prerequisites
@@ -225,6 +227,43 @@ If you want the whole stack to run without internet access, you can host a local
    Launch `uvicorn` (or the Docker container with `--env-file .env`). The chat endpoint now streams responses from the local LLM, fully offline.
 
 > **Note:** Ollama models can be several GB; download them once while you have connectivity. Performance depends on your CPU/GPU—the smaller models (`phi3:mini`, `llama3:instruct` 8B) offer a good balance for laptops.
+
+---
+
+## SMS Integration for Rural Access
+
+The application now supports SMS-based AI assistance, designed specifically for users in rural Uganda without reliable internet access.
+
+### Quick Setup
+
+1. **Get Africa's Talking Account**: Sign up at [africastalking.com](https://africastalking.com)
+2. **Configure SMS credentials** in `.env`:
+   ```bash
+   AFRICAS_TALKING_API_KEY=your_api_key_here
+   AFRICAS_TALKING_USERNAME=your_username_here
+   ```
+3. **Set webhook URL** in Africa's Talking dashboard: `https://yourdomain.com/api/sms/webhook`
+
+### How It Works
+
+Users can send questions via SMS and receive AI-generated answers:
+
+```
+User SMS: "What are malaria symptoms?"
+AI Response: "Q: What are malaria symptoms?
+
+A: Common symptoms include fever, chills, headache, muscle aches..."
+```
+
+### Key Features
+
+- **Automatic message splitting** for long responses
+- **Uganda phone number formatting** (`0701234567` → `+000000000`)
+- **Affordable SMS rates** through local providers
+- **No internet required** for end users
+- **Same AI knowledge base** as web interface
+
+📖 **[Complete SMS Setup Guide](SMS_SETUP_UGANDA.md)** - Detailed configuration and deployment instructions
 
 ---
 

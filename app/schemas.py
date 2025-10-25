@@ -25,6 +25,26 @@ class ScrapeRequest(BaseModel):
     url: HttpUrl
 
 
+class SMSWebhookRequest(BaseModel):
+    """Incoming SMS webhook from Africa's Talking"""
+    to: str  # Your shortcode/number
+    from_: str  # Sender's phone number
+    text: str  # SMS message content
+    date: str  # Timestamp
+    id: str  # Message ID
+    linkId: Optional[str] = None
+    
+    class Config:
+        fields = {"from_": "from"}
+
+
+class SMSResponse(BaseModel):
+    """Response for SMS operations"""
+    success: bool
+    message: str
+    message_id: Optional[str] = None
+
+
 class Citation(BaseModel):
     document_id: str
     filename: str

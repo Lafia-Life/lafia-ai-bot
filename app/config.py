@@ -62,6 +62,11 @@ class Settings(BaseModel):
     scraper_timeout: float = Field(default_factory=lambda: float(os.getenv("SCRAPER_TIMEOUT", "20")))
     scraper_proxy_url: Optional[str] = Field(default_factory=lambda: os.getenv("SCRAPER_PROXY_URL"))
     scraper_enable_http2: bool = Field(default_factory=lambda: _env_flag("SCRAPER_HTTP2", False))
+    
+    # SMS Configuration for Africa's Talking (Uganda)
+    africas_talking_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("AFRICAS_TALKING_API_KEY"))
+    africas_talking_username: str = Field(default_factory=lambda: os.getenv("AFRICAS_TALKING_USERNAME", "sandbox"))
+    sms_webhook_secret: Optional[str] = Field(default_factory=lambda: os.getenv("SMS_WEBHOOK_SECRET"))
 
     class Config:
         arbitrary_types_allowed = True
