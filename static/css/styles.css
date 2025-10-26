@@ -488,9 +488,10 @@ button.secondary:hover:not([disabled]) {
 .chat-actions {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
-.chat-actions button {
+.chat-actions  {
   border-radius: 50px;
 }
 

@@ -499,13 +499,227 @@ async function handleChat(event) {
   }
 }
 
+function setupVoiceRecognition() {
+  
+  const voiceBtn = document.getElementById('voice-btn');
+  const questionInput = document.getElementById('question');
+  const chatStatus = document.getElementById('chat-status');
+  
+  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    console.log("Speech recognition not supported");
+    voiceBtn.disabled = true;
+    return;
+  }
+  
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = new SpeechRecognition();
+  
+  // IMPROVED ACCURACY SETTINGS
+  recognition.continuous = false;
+  recognition.lang = "en-US";
+   // Enable real-time results
+  recognition.interimResults = true;
+   // Get more alternatives
+  recognition.maxAlternatives = 5;
+  
+  let finalTranscript = '';
+  let timeoutId;
+
+  // Add ALL event listeners for debugging
+  recognition.onstart = function() {
+    if (chatStatus) chatStatus.textContent = "Listening... Speak clearly now 🎤";
+     // Reset on start
+    finalTranscript = '';
+  };
+  
+  recognition.onresult = function(event) {    
+    // Clear any existing timeout
+    clearTimeout(timeoutId); 
+    
+    let interimTranscript = '';
+    
+    // Process all results
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];      
+      
+      if (result.isFinal) {
+        // This is a final result
+        const bestAlternative = getBestAlternative(result);
+        finalTranscript = cleanTranscript(bestAlternative.transcript);
+        console.log("Final transcript:", finalTranscript, "Confidence:", bestAlternative.confidence);
+        
+        if (questionInput) {
+          questionInput.value = finalTranscript;
+        }
+        if (chatStatus) {
+          const confidenceText = bestAlternative.confidence > 0.7 ? "High confidence" : 
+                               bestAlternative.confidence > 0.4 ? "Medium confidence" : "Low confidence";
+          chatStatus.textContent = `You said: "${finalTranscript}" (${confidenceText})`;
+        }
+        
+        // Auto-submit only for high confidence
+        if (bestAlternative.confidence > 0.6) {
+          timeoutId = setTimeout(() => {
+            console.log("🎤 Auto-submitting form...");
+            const chatForm = document.getElementById('chat-form');
+            if (chatForm) {
+              const submitEvent = new Event('submit', { 
+                bubbles: true, 
+                cancelable: true 
+              });
+              chatForm.dispatchEvent(submitEvent);
+              console.log("Submit event dispatched");
+            }
+          }, 1000);
+        } else {
+          // Low confidence - let user edit manually
+          if (chatStatus) {
+            chatStatus.textContent = `I heard: "${finalTranscript}" - Click Send if correct, or edit the text.`;
+          }
+          if (questionInput) {
+            questionInput.focus();
+          }
+        }
+        
+      } else {
+        // This is an interim result - show real-time feedback
+        interimTranscript += result[0].transcript;
+        if (chatStatus) {
+          chatStatus.textContent = `Listening: ${interimTranscript}`;
+        }
+      }
+    }
+  };
+  
+  recognition.onerror = function(event) {
+    console.error("🎤 Speech recognition error:", event.error);
+    
+    if (chatStatus) {
+      const errorMessages = {
+        'no-speech': 'No speech detected. Please try again.',
+        'audio-capture': 'No microphone found. Please check your microphone.',
+        'not-allowed': 'Microphone access denied. Please allow microphone access.',
+        'network': 'Network error occurred. Please check your connection.'
+      };
+      chatStatus.textContent = errorMessages[event.error] || `Error: ${event.error}`;
+    }
+    voiceBtn.classList.remove('listening');
+  };
+  
+  recognition.onend = function() {
+    console.log("🎤 Speech recognition ENDED");
+    voiceBtn.classList.remove('listening');
+    
+    // If no final transcript was captured but we have interim, use it
+    if (!finalTranscript && questionInput.value) {
+      finalTranscript = cleanTranscript(questionInput.value);
+      questionInput.value = finalTranscript;
+      if (chatStatus && !chatStatus.textContent.includes("You said:")) {
+        chatStatus.textContent = `You said: "${finalTranscript}" - Click Send if correct.`;
+      }
+    }
+  };
+  
+  voiceBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log("🎤 Voice button clicked!");
+    
+    if (voiceBtn.classList.contains('listening')) {
+      console.log("🎤 Stopping recognition...");
+      recognition.stop();
+      voiceBtn.classList.remove('listening');
+      if (chatStatus) chatStatus.textContent = "Stopped listening.";
+    } else {
+      console.log("🎤 Starting recognition...");
+      // Clear previous input
+      if (questionInput) questionInput.value = '';
+      finalTranscript = '';
+      
+      try {
+        recognition.start();
+        voiceBtn.classList.add('listening');
+        if (chatStatus) chatStatus.textContent = "Starting... Speak clearly 🎤";
+      } catch (error) {
+        console.error("🎤 Error starting recognition:", error);
+        if (chatStatus) chatStatus.textContent = "Error starting voice recognition";
+      }
+    }
+  });
+  
+  console.log("Voice recognition setup complete");
+}
+
+// HELPER FUNCTIONS FOR IMPROVED ACCURACY
+
+function getBestAlternative(result) {
+  // Return the alternative with highest confidence
+  let best = result[0];
+  for (let i = 1; i < result.length; i++) {
+    if (result[i].confidence > best.confidence) {
+      best = result[i];
+    }
+  }
+  return best;
+}
+
+function cleanTranscript(transcript) {
+  if (!transcript) return '';
+  
+  let cleaned = transcript;
+  
+  // Remove extra whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  
+  // Common speech recognition corrections
+  const corrections = {
+    'whats': 'what is',
+    'wheres': 'where is',
+    'hows': 'how is',
+    'whys': 'why is',
+    'whens': 'when is',
+    'whos': 'who is',
+    'pdfs': 'PDFs',
+    'ais': 'AIs',
+    'llms': 'LLMs',
+    'chat gpt': 'ChatGPT',
+    'open ai': 'OpenAI',
+    'google': 'Google',
+    'amazon': 'Amazon',
+    'microsoft': 'Microsoft'
+  };
+  
+  // Apply corrections (case insensitive)
+  Object.keys(corrections).forEach(wrong => {
+    const regex = new RegExp('\\b' + wrong + '\\b', 'gi');
+    cleaned = cleaned.replace(regex, corrections[wrong]);
+  });
+  
+  // Capitalize first letter
+  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  
+  // Smart punctuation
+  const isQuestion = cleaned.toLowerCase().match(/^(what|how|why|when|where|who|can|could|would|should|is|are|does|do|will|may)\b/);
+  const hasPunctuation = /[.?!]$/.test(cleaned);
+  
+  if (isQuestion && !hasPunctuation) {
+    cleaned += '?';
+  } else if (!hasPunctuation && cleaned.length > 10) {
+    cleaned += '.';
+  }
+  
+  console.log("Cleaned transcript:", cleaned);
+  return cleaned;
+}
+
+
 window.addEventListener("DOMContentLoaded", () => {
   const uploadForm = $("#upload-form");
   const chatForm = $("#chat-form");
   const referenceList = $("#reference-list");
   const scrapeForm = $("#scrape-form");
   const referenceModal = $("#reference-modal");
-  const modalClose = $("#reference-modal-close");
+  const modalClose = $("#reference-modal-close");  
 
   if (uploadForm) {
     uploadForm.addEventListener("submit", handleUpload);
@@ -542,6 +756,8 @@ window.addEventListener("DOMContentLoaded", () => {
     placeholder.textContent = "Ask a question to see supporting passages here.";
     referenceList.appendChild(placeholder);
   }
+   // Setup voice recognition
+  setupVoiceRecognition();
 
   fetchDocuments().catch((err) => console.error(err));
 });
