@@ -29,6 +29,13 @@ def _resolve_openai_base_url() -> Optional[str]:
     )
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Settings(BaseModel):
     openai_api_key: Optional[str] = Field(default_factory=_resolve_openai_key)
     openai_base_url: Optional[str] = Field(default_factory=_resolve_openai_base_url)
@@ -46,6 +53,20 @@ class Settings(BaseModel):
     chunk_overlap: int = Field(default=200)
     chroma_path: Path = Field(default_factory=lambda: Path("storage") / "chroma")
     uploads_path: Path = Field(default_factory=lambda: Path("storage") / "uploads")
+    scraper_user_agent: str = Field(
+        default_factory=lambda: os.getenv(
+            "SCRAPER_USER_AGENT",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        )
+    )
+    scraper_timeout: float = Field(default_factory=lambda: float(os.getenv("SCRAPER_TIMEOUT", "20")))
+    scraper_proxy_url: Optional[str] = Field(default_factory=lambda: os.getenv("SCRAPER_PROXY_URL"))
+    scraper_enable_http2: bool = Field(default_factory=lambda: _env_flag("SCRAPER_HTTP2", False))
+    
+    # SMS Configuration for Africa's Talking (Uganda)
+    africas_talking_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("AFRICAS_TALKING_API_KEY"))
+    africas_talking_username: str = Field(default_factory=lambda: os.getenv("AFRICAS_TALKING_USERNAME", "sandbox"))
+    sms_webhook_secret: Optional[str] = Field(default_factory=lambda: os.getenv("SMS_WEBHOOK_SECRET"))
 
     class Config:
         arbitrary_types_allowed = True

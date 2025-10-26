@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Manage Documents · PDF Chat Assistant</title>
+    <title>Elearning Assistant</title>
     <link rel="stylesheet" href="/static/css/styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <header class="app-header">
         <div class="brand">
-          <span class="brand-mark">📄</span>
-          <h1>Manage Documents</h1>
+           <img class="brand-mark" src="/static/logo.png" style="width: 100px; height: 100px" alt="MoH Logo" />
+          <h1>MoH E-Learning Assistant</h1>
         </div>
         <div class="header-actions">
           <a class="header-link" href="/chat">Open Chat</a>
@@ -21,10 +21,10 @@
       <section id="upload-view" class="view">
         <div class="panel">
           <h2>Add Sources</h2>
-          <p class="panel-description">Upload PDF reports or scrape web pages to include them in your knowledge base.</p>
+          <p class="panel-description">Upload PDF reports, OCR-ready images, or scrape web pages to include them in your knowledge base.</p>
           <form id="upload-form" class="upload-form">
-            <input id="file-input" name="file" type="file" accept="application/pdf" required />
-            <button type="submit">Upload PDF</button>
+            <input id="file-input" name="file" type="file" accept="application/pdf,image/*" required />
+            <button type="submit">Upload File</button>
           </form>
           <div id="upload-status" class="status" role="status"></div>
 

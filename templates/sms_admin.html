@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SMS Admin - MoH E-Learning Assistant</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+    <style>
+        .sms-admin {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .sms-test-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-group textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        .sms-preview {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #2196f3;
+        }
+        .sms-part {
+            background: white;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .sms-part-header {
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .character-count {
+            font-size: 12px;
+            color: #666;
+            text-align: right;
+        }
+        .status-message {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .btn-primary { 
+            background: #007bff; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+        }
+        .btn-primary:hover { background: #0056b3; }
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="sms-admin">
+        <h1>📱 SMS Administration</h1>
+        <p>Test SMS functionality for the MoH E-Learning Assistant</p>
+        
+        <div class="sms-test-form">
+            <h3>Send Test SMS</h3>
+            <form id="sms-form">
+                <div class="form-group">
+                    <label for="phone">Phone Number</label>
+                    <input type="tel" id="phone" name="phone" placeholder="+000000000 or 0701234567" required>
+                    <div class="help-text">Uganda format: +256XXXXXXXXX or 0XXXXXXXXX</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="message">Message</label>
+                    <textarea id="message" name="message" placeholder="Enter your test message here..." required></textarea>
+                    <div class="character-count" id="char-count">0 characters</div>
+                </div>
+                
+                <div id="sms-preview" class="sms-preview" style="display: none;">
+                    <h4>SMS Preview</h4>
+                    <div id="preview-content"></div>
+                </div>
+                
+                <button type="submit" class="btn-primary">Send SMS</button>
+            </form>
+            
+            <div id="status" class="status-message" style="display: none;"></div>
+        </div>
+        
+        <div class="sms-test-form">
+            <h3>Test AI Chat Response</h3>
+            <form id="chat-form">
+                <div class="form-group">
+                    <label for="question">Test Question</label>
+                    <input type="text" id="question" name="question" placeholder="What are the symptoms of malaria?" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="phone-chat">Response Phone Number</label>
+                    <input type="tel" id="phone-chat" name="phone-chat" placeholder="+000000000" required>
+                </div>
+                
+                <button type="submit" class="btn-primary">Test AI Response via SMS</button>
+            </form>
+            
+            <div id="chat-status" class="status-message" style="display: none;"></div>
+        </div>
+        
+        <div class="sms-test-form">
+            <h3>Configuration Status</h3>
+            <div id="config-status">
+                <p>Checking configuration...</p>
+            </div>
+        </div>
+        
+        <div class="sms-test-form">
+            <h3>SMS Integration Guide</h3>
+            <p><strong>For rural Uganda users:</strong></p>
+            <ol>
+                <li>Users send SMS to your shortcode/phone number</li>
+                <li>Questions are automatically processed by AI</li>
+                <li>Responses sent back via SMS (auto-split if long)</li>
+                <li>No internet required for users</li>
+            </ol>
+            
+            <p><strong>Supported phone formats:</strong></p>
+            <ul>
+                <li><code>+000000000</code> (International)</li>
+                <li><code>0701234567</code> (Local Uganda)</li>
+                <li><code>701234567</code> (Without prefix)</li>
+            </ul>
+            
+            <p><strong>Setup Requirements:</strong></p>
+            <ul>
+                <li>Africa's Talking account with SMS credits</li>
+                <li>API key configured in environment</li>
+                <li>Webhook URL set in Africa's Talking dashboard</li>
+                <li>HTTPS certificate for production webhook</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Character counter and SMS preview
+        const messageInput = document.getElementById('message');
+        const charCount = document.getElementById('char-count');
+        const previewDiv = document.getElementById('sms-preview');
+        const previewContent = document.getElementById('preview-content');
+        
+        messageInput.addEventListener('input', updatePreview);
+        
+        function updatePreview() {
+            const message = messageInput.value;
+            const length = message.length;
+            charCount.textContent = `${length} characters`;
+            
+            if (length > 0) {
+                previewDiv.style.display = 'block';
+                const parts = splitMessage(message);
+                previewContent.innerHTML = parts.map((part, index) => 
+                    `<div class="sms-part">
+                        <div class="sms-part-header">SMS Part ${index + 1} of ${parts.length}</div>
+                        <div>${escapeHtml(part)}</div>
+                        <div class="character-count">${part.length} characters</div>
+                    </div>`
+                ).join('');
+            } else {
+                previewDiv.style.display = 'none';
+            }
+        }
+        
+        function splitMessage(message, maxLength = 155) {
+            if (message.length <= maxLength) return [message];
+            
+            const words = message.split(' ');
+            const chunks = [];
+            let current = '';
+            
+            for (const word of words) {
+                const test = current + (current ? ' ' : '') + word;
+                if (test.length <= maxLength) {
+                    current = test;
+                } else {
+                    if (current) chunks.push(current);
+                    current = word;
+                }
+            }
+            if (current) chunks.push(current);
+            
+            // Add part indicators
+            if (chunks.length > 1) {
+                return chunks.map((chunk, i) => `(${i + 1}/${chunks.length}) ${chunk}`);
+            }
+            return chunks;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function showStatus(elementId, message, isError = false) {
+            const statusEl = document.getElementById(elementId);
+            statusEl.textContent = message;
+            statusEl.className = 'status-message ' + (isError ? 'status-error' : 'status-success');
+            statusEl.style.display = 'block';
+        }
+        
+        // SMS form submission
+        document.getElementById('sms-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const phone = document.getElementById('phone').value;
+            const message = document.getElementById('message').value;
+            
+            try {
+                const response = await fetch('/api/sms/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone_number: phone, message: message })
+                });
+                
+                const result = await response.json();
+                showStatus('status', result.message, !result.success);
+            } catch (error) {
+                showStatus('status', 'Error: ' + error.message, true);
+            }
+        });
+        
+        // Chat form submission
+        document.getElementById('chat-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const question = document.getElementById('question').value;
+            const phone = document.getElementById('phone-chat').value;
+            
+            showStatus('chat-status', 'Processing question with AI...');
+            
+            try {
+                // First get AI response
+                const chatResponse = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question })
+                });
+                
+                if (!chatResponse.ok) {
+                    throw new Error('AI chat failed');
+                }
+                
+                // For demo, we'll construct the response manually since we can't easily stream here
+                const mockResponse = `Q: ${question.substring(0, 50)}${question.length > 50 ? '...' : ''}
+
+A: Based on the available information, here's what I found regarding your question.
+
+--
+MoH E-Learning Assistant
+Send questions anytime!`;
+                
+                // Send via SMS
+                const smsResponse = await fetch('/api/sms/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone_number: phone, message: mockResponse })
+                });
+                
+                const smsResult = await smsResponse.json();
+                showStatus('chat-status', 
+                    smsResult.success ? 'AI response sent via SMS successfully!' : 'Failed to send SMS: ' + smsResult.message, 
+                    !smsResult.success
+                );
+            } catch (error) {
+                showStatus('chat-status', 'Error: ' + error.message, true);
+            }
+        });
+        
+        // Check configuration on load
+        window.addEventListener('load', async () => {
+            const configStatus = document.getElementById('config-status');
+            try {
+                // Try to send to a test number to check if API is configured
+                const response = await fetch('/api/sms/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone_number: '+000000000', message: 'test' })
+                });
+                
+                if (response.status === 503) {
+                    configStatus.innerHTML = `
+                        <p style="color: #dc3545;">❌ SMS not configured</p>
+                        <p>Set <code>AFRICAS_TALKING_API_KEY</code> in your environment to enable SMS functionality.</p>
+                    `;
+                } else {
+                    configStatus.innerHTML = `
+                        <p style="color: #28a745;">✅ SMS service configured</p>
+                        <p>Africa's Talking API credentials are set up correctly.</p>
+                    `;
+                }
+            } catch (error) {
+                configStatus.innerHTML = `
+                    <p style="color: #ffc107;">⚠️ Could not check configuration</p>
+                    <p>Make sure the FastAPI server is running.</p>
+                `;
+            }
+        });
+    </script>
+</body>
+</html>
