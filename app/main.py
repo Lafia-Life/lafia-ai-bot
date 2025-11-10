@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
+import uuid
 
 from app.config import Settings, get_openai_api_key, get_settings
 from app.schemas import ChatRequest, DocumentSummary, ScrapeRequest, UploadResponse, SMSWebhookRequest, SMSResponse
@@ -12,8 +13,13 @@ from app.services.document_store import DocumentStore
 from app.services.ingestion import ingest_document, ingest_web_page
 from app.services.retrieval import stream_answer, answer_question
 from app.services.sms_service import send_sms_response, parse_incoming_sms
+from app.whatsapp_chat import app as whatsapp_app
+from app.schemas import VideoUploadRequest,VideoResource
+
 
 app = FastAPI(title="PDF Chat Assistant")
+app.mount("/webhook", whatsapp_app)
+
 
 settings = get_settings()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -326,3 +332,33 @@ async def test_webhook_flow(request: Request):
             "error": str(e),
             "webhook_data": webhook_data
         }
+    
+@app.post("/api/videos")
+def upload_video(payload: VideoUploadRequest):
+    """Upload a video link (no file processing, just store the metadata)"""
+    settings = get_settings()
+    document_store = DocumentStore(settings.chroma_path)
+    
+    # Create a document entry for the video
+    document_id = str(uuid.uuid4())
+    
+    video_data = {
+        "title": payload["title"],
+        "url": payload["url"],
+        "type": payload["type"],
+        "description": payload.get("description", "")
+    }
+    
+    summary = DocumentSummary(
+        document_id=document_id,
+        filename=payload["title"],
+        page_count=1,
+        source_type="video",
+        url=payload["url"],
+        is_video=True,
+        video_data=video_data
+    )
+    
+    document_store.upsert(summary)
+    
+    return UploadResponse(document=summary, chunks_indexed=0)
