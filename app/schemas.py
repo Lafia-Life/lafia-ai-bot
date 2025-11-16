@@ -1,10 +1,21 @@
 from typing import List, Optional
+from datetime import datetime
 from pydantic import BaseModel, HttpUrl
+from enum import Enum
 
 
-# -----------------------------
-# 📄 Document & Upload Models
-# -----------------------------
+class ResourceType(str, Enum):
+    PDF = "pdf"
+    VIDEO = "video"
+    WEB = "web"
+    IMAGE = "image"
+
+class VideoResource(BaseModel):
+    title: str
+    url: str
+    type: str  # "youtube", "direct"
+    description: Optional[str] = None
+
 class DocumentSummary(BaseModel):
     document_id: str
     filename: str
@@ -16,6 +27,43 @@ class DocumentSummary(BaseModel):
 class UploadResponse(BaseModel):
     document: DocumentSummary
     chunks_indexed: int
+class VideoType(str, Enum):
+    YOUTUBE = "youtube"
+    DIRECT = "direct"
+    UPLOAD = "upload"
+
+
+class VideoSummary(BaseModel):
+    video_id: str
+    title: str
+    url: Optional[str] = None
+    type: VideoType
+    description: Optional[str] = None
+    filename: Optional[str] = None
+    file_path: Optional[str] = None
+    created_at: str 
+    duration: Optional[str] = None
+
+
+class UploadResponse(BaseModel):
+    document: DocumentSummary
+    chunks_indexed: int
+
+
+class VideoUploadResponse(BaseModel):
+    video: VideoSummary
+    message: str
+
+
+class VideoListResponse(BaseModel):
+    videos: List[VideoSummary]
+
+
+class VideoUploadRequest(BaseModel):
+    title: str
+    url: Optional[str] = None
+    type: VideoType
+    description: Optional[str] = None
 
 
 # -----------------------------

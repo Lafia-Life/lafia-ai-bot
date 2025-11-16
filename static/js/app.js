@@ -188,6 +188,98 @@ async function handleUpload(event) {
   }
 }
 
+async function handleVideoUpload(event) {
+  event.preventDefault();
+  
+  const status = $("#upload-video-status");
+  
+  if (!status) {
+    return;
+  }
+  
+  status.style.color = "";
+  status.textContent = "Uploading video...";
+
+  try {
+    const title = document.getElementById("video-title").value;
+    const url = document.getElementById("video-url").value;
+    const type = document.getElementById("video-type").value;
+    const description = document.getElementById("video-description").value;
+    const fileInput = document.getElementById("video-file-input");
+    const file = fileInput.files[0];
+    
+    // Validate required fields
+    if (!title) {
+      throw new Error("Video title is required");
+    }
+    if (!type) {
+      throw new Error("Video type is required");
+    }
+    console.log("Type value:", type, "Type length:", type.length);
+
+    // VALIDATION FIX: Make file optional, but require either file OR URL based on type
+    if (type === 'upload' && !file) {
+      throw new Error("Please select a video file for upload type");
+    }
+    
+    if ((type === 'youtube' || type === 'direct') && !url) {
+      throw new Error("URL is required for YouTube and Direct video types");
+    }
+
+    // Create FormData
+    const formData = new FormData();
+    
+    // ONLY append file if it exists
+    if (file) {
+      formData.append('file', file);
+    }
+    
+    formData.append('title', title);    
+    formData.append('type', type);  
+    
+    // Only append if provided
+    if (url && url.trim() !== '') {
+      formData.append('url', url);
+    }
+    if (description && description.trim() !== '') {
+      formData.append('description', description);
+    }
+    
+    console.log("Uploading video data:", {
+      title,
+      type,
+      url: url || 'No URL provided',
+      hasFile: !!file,
+      description: description || 'No description'
+    });
+    
+    const response = await fetch("/api/videos", {
+      method: "POST",
+      body: formData
+    });
+        
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || `Upload failed (${response.status})`);
+    }
+    
+    const payload = await response.json();
+    console.log("Video upload successful:", payload);
+    
+    // Use video response format
+    status.textContent = `${payload.message || 'Video uploaded successfully!'}`;
+    status.style.color = "green";
+    
+    // Reset the form
+    event.target.reset();
+    
+  } catch (err) {
+    console.error("Video upload error:", err);
+    status.textContent = err.message;
+    status.style.color = "#dc2626";
+  }
+}
+
 function appendMessage(role, content) {
   const container = $("#chat-messages");
   if (!container) {
@@ -524,10 +616,20 @@ async function handleChat(event) {
 }
 
 function setupVoiceRecognition() {
-  
+
   const voiceBtn = document.getElementById('voice-btn');
   const questionInput = document.getElementById('question');
   const chatStatus = document.getElementById('chat-status');
+  if (!voiceBtn) {
+    console.log("Voice recognition not needed on this page");
+    return;
+  }
+   // If no question input exists, disable voice and exit
+  if (!questionInput) {
+    console.log("Question input not found - disabling voice recognition");
+    voiceBtn.disabled = true;
+    return;
+  }
   
   if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
     console.log("Speech recognition not supported");
@@ -647,15 +749,12 @@ function setupVoiceRecognition() {
   voiceBtn.addEventListener('click', function(e) {
     e.preventDefault();
     e.stopPropagation();
-    console.log("🎤 Voice button clicked!");
     
     if (voiceBtn.classList.contains('listening')) {
-      console.log("🎤 Stopping recognition...");
       recognition.stop();
       voiceBtn.classList.remove('listening');
       if (chatStatus) chatStatus.textContent = "Stopped listening.";
     } else {
-      console.log("🎤 Starting recognition...");
       // Clear previous input
       if (questionInput) questionInput.value = '';
       finalTranscript = '';
@@ -739,14 +838,20 @@ function cleanTranscript(transcript) {
 
 window.addEventListener("DOMContentLoaded", () => {
   const uploadForm = $("#upload-form");
+  const videoUploadForm = $("#video-upload-form");
   const chatForm = $("#chat-form");
   const referenceList = $("#reference-list");
   const scrapeForm = $("#scrape-form");
   const referenceModal = $("#reference-modal");
   const modalClose = $("#reference-modal-close");  
+  console.log("videoUploadForm found:", videoUploadForm);
 
   if (uploadForm) {
     uploadForm.addEventListener("submit", handleUpload);
+  }
+  if (videoUploadForm) {
+      console.log("Video form submit event FIRED"); // Add this
+    videoUploadForm.addEventListener("submit", handleVideoUpload);
   }
 
   if (scrapeForm) {
@@ -781,7 +886,12 @@ window.addEventListener("DOMContentLoaded", () => {
     referenceList.appendChild(placeholder);
   }
    // Setup voice recognition
-  setupVoiceRecognition();
+  const voiceBtns = document.getElementById('voice-btn');
+  console.log("voice",voiceBtns);
+  if (chatForm && voiceBtns) {
+    setupVoiceRecognition();
+  }
+  // setupVoiceRecognition();
 
   fetchDocuments().catch((err) => console.error(err));
 });
