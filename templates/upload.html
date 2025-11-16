@@ -38,7 +38,33 @@
           </form>
           <div id="scrape-status" class="status" role="status"></div>
         </div>
-
+        <div class="divider">
+            <span>or</span>
+        </div>
+        <form id="video-upload-form" class="upload-form" enctype="multipart/form-data">
+          <div class="form-group">
+              <input id="video-title" class="video-input" name="title" type="text" placeholder="Video Title" required />
+          </div>
+          <div class="form-group">
+              <select id="video-type" class="video-input" name="type" required>
+                  <option value="">Select Video Type</option>
+                  <option value="youtube">YouTube</option>
+                  <option value="direct">Direct Video Link</option>
+                  <option value="upload">File Upload</option>
+              </select>
+          </div>
+          <div class="form-group">
+              <input id="video-url" class="video-input" name="url" type="url" placeholder="Video URL (for YouTube or direct links)" />
+          </div>
+           <div class="form-group">
+              <input id="video-file-input" class="video-input" name="file" type="file" accept="video/*" />
+          </div>
+          <div class="form-group">
+              <textarea id="video-description" name="description" placeholder="Video Description (optional)"></textarea>
+          </div>
+          <button type="submit" id="video-submit-btn">Upload Video</button>
+      </form>
+        <div id="upload-video-status" class="status" role="status"></div>
         <div class="panel">
           <div class="panel-header">
             <h3>Indexed Documents</h3>
@@ -48,6 +74,6 @@
       </section>
     </main>
 
-    <script src="/static/js/app.js?v=20251018" defer></script>
+    <script src="/static/js/app.js?v=20251020" defer></script>
   </body>
 </html>
