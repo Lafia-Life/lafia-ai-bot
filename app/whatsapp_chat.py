@@ -10,6 +10,10 @@ from app.services.document_store import DocumentStore
 from app.services.video_store import VideoStore
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
+import functools
+import time
+import asyncio
+from starlette.requests import Request  
 
 user_state = {}
 app = FastAPI()
@@ -18,6 +22,10 @@ settings = get_settings()
 conversation_history = {}
 document_store = DocumentStore(settings.chroma_path)
 video_store = VideoStore(settings.chroma_path)
+document_path_cache = {}
+courses_cache = {}
+courses_cache_timestamp = 0
+CACHE_DURATION = 300  # 5 minutes
 
 app.mount("/uploads", StaticFiles(directory="storage/uploads"), name="uploads")
 app.add_middleware(
@@ -36,176 +44,76 @@ def escape_xml(text: str) -> str:
                .replace("'", '&apos;'))
 
 def get_document_file_path(document_id: str):
-    """Get the actual file path from document_id - ONLY if file exists in storage"""
+    """Get the actual file path from document_id - OPTIMIZED VERSION"""
+    # Check cache first
+    if document_id in document_path_cache:
+        cached_result = document_path_cache[document_id]
+        if cached_result[0] and os.path.exists(cached_result[0]):
+            return cached_result
+    
     try:
         all_docs = document_store.list()
-        print(f"🔍 Looking for document_id: {document_id}")
-        print(f"🔍 Total documents in database: {len(all_docs)}")
-        
         found_doc = None
-        available_ids = []
         
-        # First, find the document in the database
+        # Fast database lookup
         for doc in all_docs:
             doc_id = getattr(doc, 'document_id', None)
-            filename = getattr(doc, 'filename', 'No filename')
-            available_ids.append(f"{doc_id} - {filename}")
-            
             if doc_id == document_id:
                 found_doc = doc
-                print(f"✅ FOUND IN DATABASE: {doc_id} - {filename}")
                 break
         
         if not found_doc:
-            print(f"❌ Document ID {document_id} not found in database.")
-            print(f"📋 Available document IDs: {available_ids}")
+            document_path_cache[document_id] = (None, None)
             return None, None
         
-        # Now check if the file actually exists in storage
         filename = getattr(found_doc, 'filename', 'document.pdf')
         
-        # Priority 1: Check existing file path attributes
-        existing_paths = [
+        # FAST PATH: Check most common location first
+        common_paths = [
+            # Most likely location - UUID_filename pattern
+            f"storage/uploads/{document_id}_{filename}",
+            # Second most likely - direct filename
+            f"storage/uploads/{filename}",
+            # Check document attributes
             getattr(found_doc, 'file_path', None),
-            getattr(found_doc, 'path', None),
-            getattr(found_doc, 'storage_path', None),
-            getattr(found_doc, 'file_location', None),
         ]
         
-        # Priority 2: Check common upload directories with the filename
-        upload_dirs = [
-            "storage/uploads",  # Most likely location
-            "uploads",
-            "storage",
-            "documents", 
-            "files",
-            "./storage/uploads",
-            "./uploads",
-            "../storage/uploads",
-        ]
+        for path in common_paths:
+            if path and os.path.exists(path):
+                file_size = os.path.getsize(path)
+                if file_size > 1000:  # Reasonable minimum size
+                    result = (path, filename)
+                    document_path_cache[document_id] = result
+                    return result
         
-        # Combine all possible paths to check
-        all_possible_paths = []
-        
-        # Add existing paths from document attributes
-        for path in existing_paths:
-            if path and path not in all_possible_paths:
-                all_possible_paths.append(path)
-        
-        # Add filename-based paths from upload directories
-        for upload_dir in upload_dirs:
-            if os.path.exists(upload_dir):
-                possible_path = os.path.join(upload_dir, filename)
-                if possible_path not in all_possible_paths:
-                    all_possible_paths.append(possible_path)
-                
-                # Also check for UUID-based filenames (common pattern)
-                uuid_based_path = os.path.join(upload_dir, f"{document_id}_{filename}")
-                if uuid_based_path not in all_possible_paths:
-                    all_possible_paths.append(uuid_based_path)
-        
-        # Check all possible paths for existence
-        print(f"🔍 Checking {len(all_possible_paths)} possible file locations...")
-        existing_files = []
-        
-        for file_path in all_possible_paths:
-            if file_path and os.path.exists(file_path):
-                file_size = os.path.getsize(file_path)
-                if file_size > 0:  # Ensure it's not an empty file
-                    print(f"✅ FOUND EXISTING FILE: {file_path} ({file_size} bytes)")
-                    existing_files.append((file_path, file_size))
-        
-        # Return the first existing file (prioritize by size if multiple found)
-        if existing_files:
-            # Sort by file size (largest first) to prioritize actual PDFs over small error files
-            existing_files.sort(key=lambda x: x[1], reverse=True)
-            best_file_path, best_file_size = existing_files[0]
-            print(f"✅ USING FILE: {best_file_path} ({best_file_size} bytes)")
-            return best_file_path, filename
-        
-        # No existing file found
-        print(f"❌ NO EXISTING FILE FOUND for document: {filename}")
-        print(f"📋 Checked {len(all_possible_paths)} locations")
-        return None, None
+        # If not found in common locations, return None quickly
+        document_path_cache[document_id] = (None, filename)
+        return None, filename
         
     except Exception as e:
         print(f"❌ Error in get_document_file_path: {e}")
         return None, None
-    
-# @app.get("/debug/documents")
-# async def debug_documents():
-#     """Debug endpoint to see all stored documents"""
-#     try:
-#         all_docs = document_store.list()
-#         documents_info = []
-        
-#         for doc in all_docs:
-#             doc_info = {
-#                 'document_id': getattr(doc, 'document_id', 'No ID'),
-#                 'filename': getattr(doc, 'filename', 'No filename'),
-#                 'file_path': getattr(doc, 'file_path', 'No path'),
-#                 'path': getattr(doc, 'path', 'No path'),
-#                 'storage_path': getattr(doc, 'storage_path', 'No path'),
-#                 'file_location': getattr(doc, 'file_location', 'No path'),
-#                 'course_id': getattr(doc, 'course_id', 'No course'),
-#             }
-#             documents_info.append(doc_info)
-            
-#             # Check if file actually exists
-#             possible_paths = [
-#                 getattr(doc, 'file_path', None),
-#                 getattr(doc, 'path', None),
-#                 getattr(doc, 'storage_path', None),
-#                 getattr(doc, 'file_location', None),
-#             ]
-            
-#             file_exists = False
-#             for path in possible_paths:
-#                 if path and os.path.exists(path):
-#                     doc_info['file_exists'] = True
-#                     doc_info['actual_path'] = path
-#                     file_exists = True
-#                     break
-            
-#             if not file_exists:
-#                 doc_info['file_exists'] = False
-#                 # Try uploads directory
-#                 filename = getattr(doc, 'filename', None)
-#                 if filename:
-#                     upload_path = os.path.join("storage/uploads", filename)
-#                     if os.path.exists(upload_path):
-#                         doc_info['file_exists'] = True
-#                         doc_info['actual_path'] = upload_path
-        
-#         return {
-#             "total_documents": len(all_docs),
-#             "documents": documents_info
-#         }
-        
-#     except Exception as e:
-#         return {"error": str(e)}
 
 def get_available_courses():
-    """Get courses from both documents AND videos - FIXED VERSION"""
+    """Get courses from both documents AND videos - FILTERS MISSING FILES"""
+    global courses_cache, courses_cache_timestamp
+    
+    # Return cached version if recent
+    current_time = time.time()
+    if current_time - courses_cache_timestamp < CACHE_DURATION and courses_cache:
+        return courses_cache
+    
     all_docs = document_store.list()
     all_videos = video_store.list()
     
     courses = {}
-    base_url = "https://5f15b1ed7c02.ngrok-free.app"  # Your ngrok URL
+    base_url = "https://5f15b1ed7c02.ngrok-free.app"
     
-    # Process documents (unchanged)
+    # Use cached file paths when possible - FILTER OUT MISSING FILES
     for doc in all_docs:
         course_id = getattr(doc, 'course_id', None) 
         if not course_id:
-            if hasattr(doc, 'filename'):
-                if '_' in doc.filename:
-                    course_id = doc.filename.split('_')[0]
-                elif '-' in doc.filename:
-                    course_id = doc.filename.split('-')[0]
-                else:
-                    course_id = "general"
-            else:
-                course_id = "general"
+            course_id = "general"
         
         course_name = getattr(doc, 'course_name', None) or f"Course: {course_id.title()}"
         
@@ -221,26 +129,26 @@ def get_available_courses():
         filename = getattr(doc, 'filename', 'Unknown Document')
         
         if doc_id:
-            courses[course_id]['pdfs'].append({
-                'filename': filename,
-                'download_url': f"/documents/{doc_id}/download",
-                'document_id': doc_id
-            })
+            # Use cached path if available - ONLY ADD IF FILE EXISTS
+            file_path = document_path_cache.get(doc_id, (None, None))[0]
+            file_exists = file_path and os.path.exists(file_path)
+            
+            # Only add to courses if file actually exists
+            if file_exists:
+                courses[course_id]['pdfs'].append({
+                    'filename': filename,
+                    'download_url': f"/webhook/documents/{doc_id}/download",
+                    'document_id': doc_id,
+                    'file_exists': file_exists
+                })
+            # else:
+            #     print(f"🚫 Filtered out missing PDF: {filename}")
     
-    # Process videos - FIXED: Convert relative URLs to absolute
+    # Process videos (your existing video code here)
     for video in all_videos:
         course_id = getattr(video, 'course_id', None)
         if not course_id:
-            if hasattr(video, 'title'):
-                title = video.title
-                if '_' in title:
-                    course_id = title.split('_')[0]
-                elif '-' in title:
-                    course_id = title.split('-')[0]
-                else:
-                    course_id = "general"
-            else:
-                course_id = "general"
+            course_id = "general"
         
         course_name = getattr(video, 'course_name', None) or f"Course: {course_id.title()}"
         
@@ -260,14 +168,11 @@ def get_available_courses():
         final_url = None
         video_type = None
         
-        # FIX: Convert relative URLs to absolute URLs
         if existing_url:
             if existing_url.startswith('/'):
-                # Convert relative URL to absolute URL
                 filename = os.path.basename(existing_url)
                 final_url = f"{base_url}/serve-video/{filename}"
                 video_type = 'uploaded'
-                print(f"🔄 CONVERTED URL: {existing_url} -> {final_url}")
             elif 'youtube.com' in existing_url or 'youtu.be' in existing_url:
                 video_type = 'youtube'
                 final_url = existing_url
@@ -275,7 +180,6 @@ def get_available_courses():
                 video_type = 'direct'
                 final_url = existing_url
         elif file_path and os.path.exists(file_path):
-            # Fallback: generate URL from file path
             file_path = os.path.normpath(file_path)
             filename = os.path.basename(file_path)
             final_url = f"{base_url}/serve-video/{filename}"
@@ -283,83 +187,42 @@ def get_available_courses():
         
         if final_url and video_type:
             courses[course_id]['videos'].append({
-                'url': final_url,  # Now always absolute URL
+                'url': final_url,
                 'title': video_title,
                 'type': video_type,
                 'video_id': video_id,
             })
-            print(f"✅ VIDEO ADDED: {video_title} -> {final_url}")
     
+    # Cache the result
+    courses_cache = courses
+    courses_cache_timestamp = current_time
     return courses
 
-@app.get("/documents/{document_id}/download")
-async def download_document(document_id: str):
-    """Download PDF document by document_id - ONLY if file exists"""
-    try:
-        print(f"📄 DOCUMENT DOWNLOAD ENDPOINT CALLED for document_id: {document_id}")
-        
-        file_path, filename = get_document_file_path(document_id)
-        
-        if not file_path or not os.path.exists(file_path):
-            print(f"❌ Document file not found or doesn't exist: {file_path}")
-            raise HTTPException(status_code=404, detail="Document file not found in storage")
-        
-        # Verify it's a reasonable file size (not an error message)
-        file_size = os.path.getsize(file_path)
-        if file_size < 1000:  # Less than 1KB is probably an error
-            print(f"❌ File too small ({file_size} bytes) - likely an error file")
-            raise HTTPException(status_code=404, detail="Document file is invalid")
-        
-        print(f"✅ Serving document file: {file_path} ({file_size} bytes)")
-        
-        # Determine content type
-        if filename and filename.lower().endswith('.pdf'):
-            content_type = "application/pdf"
-        elif filename and filename.lower().endswith(('.jpg', '.jpeg')):
-            content_type = "image/jpeg"
-        elif filename and filename.lower().endswith('.png'):
-            content_type = "image/png"
-        elif filename and filename.lower().endswith('.docx'):
-            content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        else:
-            content_type = "application/octet-stream"
-        
-        return FileResponse(
-            path=file_path,
-            media_type=content_type,
-            filename=filename,
-            headers={
-                'Content-Disposition': f'inline; filename="{filename}"',
-                'Cache-Control': 'no-cache'
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Error downloading document: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
-def create_pdf_download_response(pdfs, course_name, base_url: str = "https://5f15b1ed7c02.ngrok-free.app"):
-    """Create response that sends PDF files directly to WhatsApp"""
-    if not pdfs:
-        response_text = "❌ No PDFs available for this course."
+def create_pdf_download_response(pdfs, course_name, base_url):
+    
+    # Filter out PDFs that don't have files
+    valid_pdfs = [pdf for pdf in pdfs if pdf.get('file_exists', True)]
+    
+    if not valid_pdfs:
+        response_text = "❌ No PDFs available for this course (files not found)."
         escaped_text = escape_xml(response_text)
         return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
     
-    if len(pdfs) == 1:
-        pdf = pdfs[0]
-        print("Single PDF found:", pdf)
+    # If there's only one PDF, send it directly as a file
+    if len(valid_pdfs) == 1:
+        pdf = valid_pdfs[0]
         document_id = pdf.get('document_id')
         
         if document_id:
-            file_url = f"{base_url}/documents/{document_id}/download"
+            # FIX: Use the correct URL path including /webhook
+            file_url = f"{base_url}/webhook/documents/{document_id}/download"
             filename = pdf.get('filename', 'document.pdf')
             
             return f'''<?xml version="1.0" encoding="UTF-8"?>
             <Response>
                 <Message>
-                    <Body>📄 {course_name} - {filename}</Body>
+                    <Body>📄 {escape_xml(course_name)} - {escape_xml(filename)}</Body>
                     <Media>{escape_xml(file_url)}</Media>
                 </Message>
                 <Message>
@@ -367,23 +230,24 @@ def create_pdf_download_response(pdfs, course_name, base_url: str = "https://5f1
                 </Message>
             </Response>'''
                 
+    # If multiple PDFs, list them with direct file links
     messages_xml = []
     messages_xml.append(f'<Message><Body>📚 {course_name} - Available PDFs:</Body></Message>')
     
-    for i, pdf in enumerate(pdfs, 1):
-        print("Processing PDF:", pdf)
+    for i, pdf in enumerate(valid_pdfs, 1):
         filename = pdf.get('filename', f'Document {i}')
         document_id = pdf.get('document_id')
         
         if document_id:
-            file_url = f"{base_url}/documents/{document_id}/download"
-            print("file_url",file_url)
+            # FIX: Use correct URL path including /webhook
+            file_url = f"{base_url}/webhook/documents/{document_id}/download"
             message_xml = f'''<Message>
         <Body>📄 {filename}</Body>
         <Media>{escape_xml(file_url)}</Media>
     </Message>'''
             messages_xml.append(message_xml)
     
+    # Add navigation message
     messages_xml.append('''<Message>
         <Body>💡 Each PDF has been sent separately. Tap any file to view it in WhatsApp or use the download icon to save it.\\n\\n💡 Navigation:\\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit</Body>
     </Message>''')
@@ -393,6 +257,44 @@ def create_pdf_download_response(pdfs, course_name, base_url: str = "https://5f1
     {"".join(messages_xml)}
     </Response>'''
 
+@app.get("/documents/{document_id}/download")
+async def download_document(document_id: str):
+    """Download PDF document - OPTIMIZED VERSION"""
+    try:
+        # Check cache first for instant response
+        if document_id in document_path_cache:
+            file_path, filename = document_path_cache[document_id]
+            if file_path and os.path.exists(file_path):
+                return FileResponse(
+                    path=file_path,
+                    filename=filename,
+                    media_type='application/pdf',
+                    headers={
+                        'Content-Disposition': f'inline; filename="{filename}"',
+                        'Cache-Control': 'public, max-age=3600'  # Cache for 1 hour
+                    }
+                )
+        
+        # If not in cache, do quick lookup
+        file_path, filename = get_document_file_path(document_id)
+        
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="PDF not found")
+                
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type='application/pdf',
+            headers={
+                'Content-Disposition': f'inline; filename="{filename}"',
+                'Cache-Control': 'public, max-age=3600',  # Browser cache
+                'X-Accel-Buffering': 'no'  # For faster streaming
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+    
 def create_smart_video_response(video_urls, course_name, base_url: str = "https://5f15b1ed7c02.ngrok-free.app"):
     """Create response that sends VIDEO files directly to WhatsApp - URLs are already absolute"""
     if not video_urls:
@@ -408,17 +310,11 @@ def create_smart_video_response(video_urls, course_name, base_url: str = "https:
         video_list += f"{i}. {video.get('title', f'Video {i}')}\n"
     
     messages_xml.append(f'<Message><Body>{escape_xml(video_list)}</Body></Message>')
-    
-    print(f"🎬 Creating video response for {len(video_urls)} videos")
-    
+        
     # Send each video in a SEPARATE message with proper media
     for i, video in enumerate(video_urls, 1):
         video_title = video.get('title', f'Video {i}')
         video_url = video.get('url', '')
-        
-        print(f"🎬 Processing video {i}: {video_title}")
-        print(f"   URL: {video_url}")  # URL is already absolute
-        
         escaped_url = escape_xml(video_url)
         escaped_title = escape_xml(video_title)
         
@@ -428,8 +324,7 @@ def create_smart_video_response(video_urls, course_name, base_url: str = "https:
     <Media>{escaped_url}</Media>
     </Message>'''
         messages_xml.append(message_xml)
-        print(f"   ✅ Video {i} added to WhatsApp queue: {video_title}")
-    
+
     # Add navigation message at the end
     messages_xml.append('''<Message>
         <Body>💡 Each video has been sent separately. Tap any video to play it in WhatsApp or use the download icon to save it.\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit</Body>
@@ -439,49 +334,14 @@ def create_smart_video_response(video_urls, course_name, base_url: str = "https:
     <Response>
     {"".join(messages_xml)}
     </Response>'''
-    
-    print("🎬 FINAL WHATSAPP XML RESPONSE GENERATED")
     return final_xml
 
-@app.get("/debug/video-path")
-async def debug_video_path():
-    """Debug the exact file path"""
-    filename = "0fd72f21-175a-46e3-8980-c86d86b8f07d_testvideo.mp4"
-    safe_filename = os.path.basename(filename)
-    
-    locations = [
-        "storage/uploads",
-        "uploads", 
-        "storage",
-        "./storage/uploads",
-        "../storage/uploads"
-    ]
-    
-    results = []
-    
-    for location in locations:
-        file_path = os.path.join(location, safe_filename)
-        normalized_path = os.path.normpath(file_path)
-        exists = os.path.exists(normalized_path)
-        
-        results.append({
-            'location': location,
-            'file_path': file_path,
-            'normalized_path': normalized_path,
-            'exists': exists,
-            'size': os.path.getsize(normalized_path) if exists else 0
-        })
-    
-    return {"filename": safe_filename, "checks": results}
 
 @app.post("/")  
 async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
-    print(f"🎯 WEBHOOK HIT - From: {From}, Body: {Body}")
     user_msg = Body.strip().lower()
     phone = From
     
-    print(f"📱 Message from {phone}: {user_msg}")
-
     # Step 1: First contact
     if phone not in user_state:
         user_state[phone] = "main_menu"
@@ -575,21 +435,32 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             
         elif user_msg in ["6", "ask", "question"]:
             user_state[phone] = "question_mode"
-            response_text = (
-                "🤖 *Document Q&A*\n\n"
-                "I can answer questions about your course materials! 📚\n\n"
-                "🔍 *I can help with:*\n"
-                "• Specific topics from your PDFs\n"
-                "• Procedures and guidelines\n" 
-                "• Technical concepts\n"
-                "• Best practices\n\n"
-                "💡 *Try asking:*\n"
-                "• \"What are infection prevention techniques?\"\n"
-                "• \"How do i test for HIV?\"\n"
-                "• \"How is malaria spread?\"\n\n"
-                "Ask your question now:\n\n"
-                "0️⃣ Main Menu • #️⃣ Exit"
-            )
+            
+            # Show available course materials for context
+            courses = get_available_courses()
+            if not courses:
+                response_text = (
+                    "🤖 *Document Q&A*\n\n"
+                    "❌ No course materials available yet.\n\n"
+                    "Please upload documents first, then ask questions about them.\n\n"
+                    "0️⃣ Main Menu • #️⃣ Exit"
+                )
+            else:
+                # Build list of available materials
+                materials_list = "📚 *Available Course Materials:*\n\n"
+                
+                for course_id, course_data in courses.items():
+                    materials_list += f"🏷️ *{course_data['name']}*\n"
+                    
+                    materials_list += "\n"
+                
+                materials_list += (
+                    "💡 *Ask questions about:*\n"
+                    "• Specific topics from these materials\n"
+                    "0️⃣ Main Menu • #️⃣ Exit"
+                )
+                
+                response_text = materials_list
             
         elif user_msg in ["#", "exit", "quit"]:
             response_text = "👋 Thank you for using MoH E-Learning Assistant!"
@@ -777,9 +648,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             response_text = "👋 Thank you for using MoH E-Learning Assistant!"
             user_state.pop(phone, None)
         else:
-            # Store help request
-            print(f"🆘 HELP REQUEST from {phone}: {user_msg}")
-            
+            # Store help request            
             response_text = (
                 "✅ *Help Request Received!*\n\n"
                 "Our training team has been notified and will contact you shortly.\n\n"
@@ -806,9 +675,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 
             elif user_msg == "2":
                 video_urls = course_data["videos"]
-                print("course_data videos",video_urls)
                 course_name = course_data["name"] 
-                print("course name",course_name)
                 raw_xml = create_smart_video_response(video_urls, course_name,base_url)
                 return Response(content=raw_xml, media_type="application/xml")
                 
@@ -910,7 +777,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
         raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
         return Response(content=raw_xml, media_type="application/xml")
 
-    # Step 9: QUESTION MODE - WITH TYPING INDICATOR SIMULATION
+   # Step 9: QUESTION MODE - IMPROVED VERSION
     if user_state[phone] == "question_mode":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
@@ -934,73 +801,275 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 conversation_history.pop(phone)
             user_state.pop(phone, None)
         elif user_msg in ["6", "ask", "question", "another"]:
+            # Reset conversation for new question
             if phone in conversation_history:
                 conversation_history.pop(phone)
-            response_text = (
-                "🤖 *Document Q&A*\n\n"
-                "Ask any question about your learning materials:\n\n"
-                "💡 Examples:\n"
-                "• Infection prevention techniques\n" 
-                "• Waste management procedures\n"
-                "• Safety guidelines\n"
-                "• Emergency protocols\n\n"
-                "0️⃣ Main Menu • #️⃣ Exit"
-            )
+            
+            # Show simplified materials list
+            courses = get_available_courses()
+            if not courses:
+                response_text = (
+                    "🤖 *Document Q&A*\n\n"
+                    "❌ No course materials available yet.\n\n"
+                    "Please upload documents first.\n\n"
+                    "0️⃣ Main Menu • #️⃣ Exit"
+                )
+            else:
+                response_text = (
+                    "🤖 *Document Q&A*\n\n"
+                    "💡 I can answer questions about your course materials.\n\n"
+                    "📚 *Available Topics:*\n"
+                    "• IPC Software Requirements\n"
+                    "• Infection Prevention\n" 
+                    "• Safety Procedures\n"
+                    "• And more...\n\n"
+                    "🔍 *Ask me anything like:*\n"
+                    "• \"What are the software requirements?\"\n"
+                    "• \"Explain infection prevention\"\n"
+                    "• \"Tell me about safety procedures\"\n\n"
+                    "Type your question now:\n\n"
+                    "0️⃣ Main Menu • #️⃣ Exit"
+                )
+        
         else:
-        # Process the user's question with enhanced typing simulation
-            try:
-                print(f"🤖 Q&A REQUEST from {phone}: {user_msg}")
-                
+            # PROCESS USER'S QUESTION - IMPROVED VERSION
+            try:                
                 # Initialize conversation history
                 if phone not in conversation_history:
                     conversation_history[phone] = []
-                conversation_history[phone].append(f"User: {user_msg}")
-                if len(conversation_history[phone]) > 6:
-                    conversation_history[phone] = conversation_history[phone][-6:]
                 
-                # Send typing simulation messages
-                typing_messages = [
-                    "💭 _MoH Assistant is thinking..._",
-                    "🔍 _Searching through documents..._",
-                    "📚 _Analyzing course materials..._"
-                ]
+                # Send immediate processing message
+                processing_text = "💭 *Searching through course materials...*"
+                escaped_processing = escape_xml(processing_text)
+                processing_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_processing}</Message></Response>'
                 
-                # For WhatsApp, we can only return one response per webhook call
-                # So we'll combine the typing simulation into one message
-                combined_typing = "💭 *MoH Assistant is typing...*\n\n" + "\n".join(typing_messages)
-                escaped_typing = escape_xml(combined_typing)
-                typing_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_typing}</Message></Response>'
-                
-                # Process the question
+                # Process the question with BETTER query handling
                 from app.services.retrieval import answer_question
                 from app.schemas import ChatRequest
                 
+                # Create a more flexible query
                 chat_request = ChatRequest(question=user_msg)
                 chat_response = answer_question(chat_request)
                 
-                # Store response
+                # Store conversation
+                conversation_history[phone].append(f"User: {user_msg}")
                 conversation_history[phone].append(f"Assistant: {chat_response.answer}")
+                if len(conversation_history[phone]) > 6:
+                    conversation_history[phone] = conversation_history[phone][-6:]
                 
-                # Format final response
-                if hasattr(chat_response, 'citations') and chat_response.citations:
-                    citations_text = "\n\n📚 *Based on:* " + ", ".join([f"{cit.filename}" for cit in chat_response.citations[:2]])
-                    if len(chat_response.citations) > 2:
-                        citations_text += f" (+{len(chat_response.citations) - 2} more sources)"
-                    answer_text = f"✅ *Answer:*\n\n{chat_response.answer}{citations_text}"
+                # IMPROVED RESPONSE HANDLING
+                answer = chat_response.answer
+                
+                # Check for empty or generic "not found" responses
+                if not answer or any(phrase in answer.lower() for phrase in [
+                    "could not find", "not find", "no information", "not available", 
+                    "i don't know", "i cannot", "no specific information"
+                ]):
+                    # Provide more helpful guidance
+                    answer_text = (
+                        "🔍 *I couldn't find exact matches for your question.*\n\n"
+                        "💡 *Try these approaches:*\n"
+                        "• Ask about specific topics in your materials\n"
+                        "• Use simpler, more direct questions\n"
+                        "• Check the main topics in your course documents\n"
+                        "• Ask about: software requirements, procedures, guidelines\n\n"
+                        "📚 *Available materials include:* IPC Software Requirements\n\n"
+                        "6️⃣ Ask Another Question • 0️⃣ Main Menu • #️⃣ Exit"
+                    )
                 else:
-                    answer_text = f"✅ *Answer:*\n\n{chat_response.answer}"
-                
-                answer_text += "\n\n💡 *What would you like to do next?*\n6️⃣ Ask Another Question • 0️⃣ Main Menu • #️⃣ Exit"
+                    # Format successful response
+                    if hasattr(chat_response, 'citations') and chat_response.citations:
+                        unique_sources = list(set([cit.filename for cit in chat_response.citations]))
+                        citations_text = "\n\n📚 *Source: " + ", ".join(unique_sources[:2]) + "*"
+                        if len(unique_sources) > 2:
+                            citations_text += f" (+{len(unique_sources) - 2} more)"
+                    else:
+                        citations_text = "\n\n📚 *From course materials*"
+                    
+                    answer_text = f"🤖 *Answer:*\n\n{answer}{citations_text}\n\n💡 6️⃣ Ask Another Question • 0️⃣ Main Menu • #️⃣ Exit"
                 
                 escaped_answer = escape_xml(answer_text)
                 response_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_answer}</Message></Response>'
-                
-                print(f"✅ Q&A RESPONSE sent to {phone}")
                 return Response(content=response_xml, media_type="application/xml")
                 
             except Exception as e:
                 print(f"❌ Q&A Error: {str(e)}")
-                error_text = "❌ Sorry, something went wrong. Please try again.\n\n💡 0️⃣ Main Menu • #️⃣ Exit"
+                # More user-friendly error message
+                error_text = (
+                    "❌ *I'm having trouble accessing the knowledge base right now.*\n\n"
+                    "💡 *Please try:*\n"
+                    "• Asking again in a moment\n"
+                    "• Using different wording\n"
+                    "• Contacting support if this continues\n\n"
+                    "0️⃣ Main Menu • #️⃣ Exit"
+                )
                 escaped_error = escape_xml(error_text)
                 response_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_error}</Message></Response>'
                 return Response(content=response_xml, media_type="application/xml")
+            
+@app.get("/debug/whatsapp-documents")
+async def debug_whatsapp_documents():
+    """Debug endpoint to check WhatsApp document availability"""
+    courses = get_available_courses()
+    debug_info = {
+        "base_url": "https://5f15b1ed7c02.ngrok-free.app",
+        "total_courses": len(courses),
+        "courses": {}
+    }
+    
+    for course_id, course_data in courses.items():
+        debug_info["courses"][course_id] = {
+            'name': course_data['name'],
+            'pdf_count': len(course_data['pdfs']),
+            'pdfs': []
+        }
+        
+        for pdf in course_data['pdfs']:
+            document_id = pdf.get('document_id')
+            file_path, filename = get_document_file_path(document_id)
+            
+            debug_info["courses"][course_id]['pdfs'].append({
+                'document_id': document_id,
+                'filename': pdf.get('filename'),
+                'file_exists': os.path.exists(file_path) if file_path else False,
+                'file_path': file_path,
+                'download_url': f"https://5f15b1ed7c02.ngrok-free.app/webhook/documents/{document_id}/download",
+                'whatsapp_media_url': f"https://5f15b1ed7c02.ngrok-free.app/webhook/documents/{document_id}/download"
+            })
+    
+    return debug_info
+
+async def background_cache_refresh():
+    """Periodically refresh document cache"""
+    while True:
+        await asyncio.sleep(300)  # Refresh every 5 minutes
+        all_docs = document_store.list()
+        for doc in all_docs:
+            doc_id = getattr(doc, 'document_id', None)
+            if doc_id:
+                get_document_file_path(doc_id)
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup optimizations"""
+    all_docs = document_store.list()
+    for doc in all_docs:
+        doc_id = getattr(doc, 'document_id', None)
+        if doc_id:
+            get_document_file_path(doc_id)
+    
+    # Start background cache refresh
+    asyncio.create_task(background_cache_refresh())
+    
+@app.middleware("http")
+async def add_cache_headers(request: Request, call_next):
+    """Add cache headers and monitor performance"""
+    start_time = time.time()
+    response = await call_next(request)
+    
+    # Add performance header
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    
+    # Cache headers for static resources
+    if "/documents/" in str(request.url):
+        response.headers["Cache-Control"] = "public, max-age=3600"
+    
+    return response
+
+@app.get("/cleanup/missing-files")
+async def cleanup_missing_files_get():
+    """GET endpoint to identify missing files (we can't delete from document store)"""
+    all_docs = document_store.list()
+    missing_count = 0
+    found_count = 0
+    missing_docs = []
+    found_docs = []
+        
+    for doc in all_docs:
+        doc_id = getattr(doc, 'document_id', None)
+        filename = getattr(doc, 'filename', 'Unknown')
+        
+        if doc_id:
+            file_path, found_filename = get_document_file_path(doc_id)
+            if not file_path or not os.path.exists(file_path):
+                missing_count += 1
+                missing_docs.append({
+                    'document_id': doc_id,
+                    'filename': filename,
+                    'reason': 'File not found on disk'
+                })
+            else:
+                found_count += 1
+                found_docs.append({
+                    'document_id': doc_id,
+                    'filename': filename,
+                    'file_path': file_path
+                })    
+    return {
+        "missing_count": missing_count,
+        "found_count": found_count,
+        "missing_documents": missing_docs,
+        "found_documents": found_docs,
+        "message": f"Found {found_count} documents with files, {missing_count} documents missing files",
+        "note": "Cannot delete from document store - missing entries will be filtered in WhatsApp responses"
+    }
+
+@app.get("/cleanup/test")
+async def cleanup_test():
+    """Test endpoint to see what would be cleaned up"""
+    all_docs = document_store.list()
+    would_remove = []
+    would_keep = []
+    
+    for doc in all_docs:
+        doc_id = getattr(doc, 'document_id', None)
+        filename = getattr(doc, 'filename', 'Unknown')
+        
+        if doc_id:
+            file_path, found_filename = get_document_file_path(doc_id)
+            if not file_path or not os.path.exists(file_path):
+                would_remove.append({
+                    'document_id': doc_id,
+                    'filename': filename
+                })
+            else:
+                would_keep.append({
+                    'document_id': doc_id,
+                    'filename': filename,
+                    'file_path': file_path
+                })
+    
+    return {
+        "would_remove_count": len(would_remove),
+        "would_keep_count": len(would_keep),
+        "would_remove": would_remove,
+        "would_keep": would_keep
+    }
+
+@app.get("/debug/whatsapp-pdfs")
+async def debug_whatsapp_pdfs():
+    """Debug exactly what PDFs WhatsApp sees"""
+    courses = get_available_courses()
+    
+    debug_info = {
+        "all_courses": {},
+        "whatsapp_responses": {}
+    }
+    
+    for course_id, course_data in courses.items():
+        debug_info["all_courses"][course_id] = {
+            'name': course_data['name'],
+            'raw_pdf_count': len(course_data['pdfs']),
+            'pdfs': course_data['pdfs']
+        }
+        
+        # Test the create_pdf_download_response function
+        base_url = "https://5f15b1ed7c02.ngrok-free.app"
+        pdf_response = create_pdf_download_response(course_data['pdfs'], course_data['name'], base_url)
+        
+        debug_info["whatsapp_responses"][course_id] = {
+            'response_xml': pdf_response
+        }
+    
+    return debug_info

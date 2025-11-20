@@ -162,12 +162,11 @@ input[type="file"] {
 }
 
 .video-upload-form {
-  /* display: flex;
-  flex-wrap: wrap; */
+  display: flex;
+  flex-wrap: nowrap; 
   gap: 0.75rem;
   align-items: center;
 }
-
 .video-upload-form input[type="file"] {
   border: 1px dashed #93c5fd;
   background: #f8fbff;
@@ -180,9 +179,23 @@ input[type="file"] {
   border: 1px dashed #93c5fd;
   background: #f8fbff;
   border-radius: 12px;
-  padding: 0.75rem 1rem;
-  font-size: 0.95rem;
-  flex: 1 1 240px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  flex: 1;
+  min-width: 120px; 
+}
+#video-submit-btn {
+  flex: 0 0 auto;
+}
+.video-panel {
+  background: #ffffff;
+  border-radius: 16px;
+  /* padding: 1.75rem; */
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 1.2rem;
+  padding-bottom: 1.8rem;
+  padding-left: 1.7rem;
 }
 .scrape-form {
   display: flex;

@@ -21,6 +21,8 @@ from app.whatsapp_chat import app as whatsapp_app
 from app.schemas import VideoUploadRequest,VideoResource, VideoUploadResponse, VideoType, VideoSummary
 from starlette.requests import Request
 from starlette.responses import Response
+from app.whatsapp_chat import get_document_file_path
+
 
 
 app = FastAPI(title="PDF Chat Assistant")
@@ -339,76 +341,6 @@ async def test_webhook_flow(request: Request):
             "webhook_data": webhook_data
         }
     
-
-# @app.post("/api/videos", response_model=VideoUploadResponse)
-# async def upload_video(
-#     file: UploadFile = File(None),
-#     title: str = Form(...),
-#     url: Optional[str] = Form(None),
-#     type: str = Form(...),
-#     description: Optional[str] = Form("")
-# ):
-#     """Upload a video - just store it, no ingestion"""
-#     try:
-#         print(f"🎬 Video storage request: {title}")
-        
-#         # Use VideoStore instead of DocumentStore
-#         settings = get_settings()
-#         video_store = VideoStore(settings.chroma_path)
-        
-#         # Create video ID
-#         video_id = str(uuid.uuid4())
-        
-#         # Handle file if provided
-#         video_bytes = None
-#         filename = title + ".mp4"  # Default filename
-        
-#         if file and file.filename:
-#             # Just read the bytes - NO PROCESSING
-#             video_bytes = await file.read()
-#             filename = file.filename
-#             print(f"💾 Storing video file: {filename} ({len(video_bytes)} bytes)")
-#         else:
-#             print(f"🔗 Storing video URL: {url}")
-        
-#         # Convert string type to VideoType enum
-#         try:
-#             video_type_enum = VideoType(type)
-#         except ValueError:
-#             raise HTTPException(status_code=400, detail="Invalid video type")
-        
-#         # Save video file (just stores bytes, no processing)
-#         saved_path = video_store.save_video_file(
-#             video_bytes if video_bytes else b"",  # Empty bytes for URL-only videos
-#             filename, 
-#             video_id
-#         )
-        
-#         # Create VideoSummary (NOT DocumentSummary)
-#         video_summary = VideoSummary(
-#             video_id=video_id,
-#             title=title,
-#             url=url,
-#             type=video_type_enum,
-#             description=description,
-#             filename=filename,
-#             file_path=str(saved_path),
-#             created_at=datetime.now().isoformat(), 
-#             duration=None
-#         )
-        
-#         # Store in VideoStore (NOT DocumentStore)
-#         video_store.upsert(video_summary)
-        
-#         # Return VideoUploadResponse (NOT UploadResponse)
-#         return VideoUploadResponse(
-#             video=video_summary,
-#             message=f"Video '{title}' stored successfully"
-#         )
-        
-#     except Exception as e:
-#         print(f"Video storage error: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
 def debug_storage_layout():
     """Debug the actual storage layout"""
     print("📁 STORAGE LAYOUT DEBUG:")
@@ -515,92 +447,7 @@ async def upload_video(
     except Exception as e:
         print(f"Video storage error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    
 
-@app.get("/debug/routes")
-async def debug_routes():
-    """Show all registered routes"""
-    routes = []
-    for route in app.routes:
-        if hasattr(route, "methods") and hasattr(route, "path"):
-            routes.append({
-                "path": route.path,
-                "methods": list(route.methods),
-                "name": getattr(route, "name", "N/A")
-            })
-    return {"routes": routes}
-
-@app.get("/test-simple")
-async def test_simple():
-    """Simple test endpoint to check if server is working"""
-    return {"status": "success", "message": "Server is running"}
-
-
-@app.get("/debug/video-files")
-async def debug_video_files():
-    """Check if video files actually exist on disk"""
-    
-    video_files = []
-    
-    # Check storage/uploads directory
-    upload_dirs = [
-        "storage/uploads",
-        "uploads", 
-        "./storage/uploads",
-        "../storage/uploads"
-    ]
-    
-    for upload_dir in upload_dirs:
-        if os.path.exists(upload_dir):
-            print(f"🔍 Checking directory: {upload_dir}")
-            for ext in ['*.mp4', '*.mov', '*.avi', '*.mkv']:
-                files = glob.glob(os.path.join(upload_dir, ext))
-                for file_path in files:
-                    file_size = os.path.getsize(file_path)
-                    video_files.append({
-                        'filename': os.path.basename(file_path),
-                        'path': file_path,
-                        'size_bytes': file_size,
-                        'size_mb': round(file_size / (1024 * 1024), 2)
-                    })
-    
-    return {
-        "video_files_found": len(video_files),
-        "upload_dirs_checked": upload_dirs,
-        "files": video_files
-    }
-
-
-@app.get("/debug/video-path")
-async def debug_video_path():
-    """Debug the exact file path"""
-    filename = "0fd72f21-175a-46e3-8980-c86d86b8f07d_testvideo.mp4"
-    safe_filename = os.path.basename(filename)
-    
-    locations = [
-        "storage/uploads",
-        "uploads", 
-        "storage",
-        "./storage/uploads",
-        "../storage/uploads"
-    ]
-    
-    results = []
-    
-    for location in locations:
-        file_path = os.path.join(location, safe_filename)
-        normalized_path = os.path.normpath(file_path)
-        exists = os.path.exists(normalized_path)
-        
-        results.append({
-            'location': location,
-            'file_path': file_path,
-            'normalized_path': normalized_path,
-            'exists': exists,
-            'size': os.path.getsize(normalized_path) if exists else 0
-        })
-    
-    return {"filename": safe_filename, "checks": results}
 
 @app.get("/serve-video/{filename}")
 @app.head("/serve-video/{filename}")
@@ -638,96 +485,45 @@ async def serve_video(filename: str, request: Request):
         headers=headers
     )
 
-@app.get("/debug/actual-files")
-async def debug_actual_files():
-    """Show exactly what files exist in storage directories"""
-    locations = ["storage/uploads", "uploads", "storage"]
-    
-    results = {}
-    
-    for location in locations:
-        if os.path.exists(location):
-            files = []
-            for item in os.listdir(location):
-                item_path = os.path.join(location, item)
-                if os.path.isfile(item_path):
-                    files.append({
-                        'name': item,
-                        'size': os.path.getsize(item_path),
-                        'path': os.path.abspath(item_path)
-                    })
-            results[location] = {
-                'exists': True,
-                'files': files,
-                'absolute_path': os.path.abspath(location)
-            }
-        else:
-            results[location] = {
-                'exists': False,
-                'absolute_path': os.path.abspath(location) if location else location
-            }
-    
-    return results
-
-@app.get("/debug/video-info/{filename}")
-async def debug_video_info(filename: str):
-    """Check if video meets WhatsApp requirements"""
-    safe_filename = os.path.basename(filename)
-    file_path = os.path.join("storage/uploads", safe_filename)
-    
-    if not os.path.exists(file_path):
-        return {"error": "File not found", "path": file_path}
-    
-    file_size = os.path.getsize(file_path)
-    file_size_mb = round(file_size / (1024 * 1024), 2)
-    
-    # Check WhatsApp limits
-    whatsapp_compatible = file_size_mb <= 16
-    is_mp4 = safe_filename.lower().endswith('.mp4')
-    
-    return {
-        "filename": safe_filename,
-        "file_path": file_path,
-        "file_size_bytes": file_size,
-        "file_size_mb": file_size_mb,
-        "is_mp4": is_mp4,
-        "whatsapp_compatible_size": whatsapp_compatible,
-        "meets_requirements": whatsapp_compatible and is_mp4,
-        "notes": "WhatsApp requires: MP4 format, max 16MB, H.264 video, AAC audio"
-    }
-
-@app.get("/debug/whatsapp-video-urls")
-async def debug_whatsapp_video_urls():
-    """Debug what video URLs WhatsApp is receiving"""
-    from app.whatsapp_chat import get_available_courses
-    
-    courses = get_available_courses()
-    results = {}
-    
-    for course_id, course_data in courses.items():
-        videos = course_data.get('videos', [])
-        course_results = []
+@app.get("/debug/document-status/{document_id}")
+async def debug_document_status(document_id: str, store: DocumentStore = Depends(get_document_store)):
+    """Debug endpoint to check document status"""
+    try:
+        print(f"🔍 DEBUG: Looking for document_id: {document_id}")
         
-        for video in videos:
-            video_info = {
-                'title': video.get('title'),
-                'type': video.get('type'),
-                'original_url': video.get('url'),
-                'whatsapp_url': None
+        # Try to get the document
+        summary = store.get(document_id)
+        if not summary:
+            return {
+                "document_id": document_id,
+                "found_in_database": False,
+                "error": "Document not found in database"
+            }
+        
+        print(f"✅ DEBUG: Found in database: {summary.filename}")
+        
+        # Try to resolve file path
+        try:
+            summary, file_path = _resolve_document_path(document_id, store)
+            return {
+                "document_id": document_id,
+                "found_in_database": True,
+                "filename": summary.filename,
+                "file_path": str(file_path),
+                "file_exists": file_path.exists(),
+                "file_size": file_path.stat().st_size if file_path.exists() else 0,
+                "source_type": summary.source_type
+            }
+        except Exception as path_error:
+            return {
+                "document_id": document_id,
+                "found_in_database": True,
+                "filename": summary.filename,
+                "error": f"File path resolution failed: {str(path_error)}"
             }
             
-            # Simulate what create_smart_video_response does
-            if video.get('type') == 'uploaded':
-                url = video.get('url', '')
-                if url.startswith('/'):
-                    filename = os.path.basename(url)
-                    video_info['whatsapp_url'] = f"https://8cdbf1c1aba5.ngrok-free.app/serve-video/{filename}"
-                else:
-                    video_info['whatsapp_url'] = url
-            
-            course_results.append(video_info)
-        
-        if course_results:
-            results[course_id] = course_results
-    
-    return results
+    except Exception as e:
+        return {
+            "document_id": document_id,
+            "error": f"Unexpected error: {str(e)}"
+        }

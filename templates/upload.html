@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -36,34 +36,38 @@
             <input id="url-input" name="url" type="url" placeholder="https://example.com/article" required />
             <button type="submit">Scrape URL</button>
           </form>
-          <div id="scrape-status" class="status" role="status"></div>
         </div>
-        <div class="divider">
+        <div class="video-panel">
+          <h2>Upload Video(s)</h2>
+          <p class="panel-description">Upload training videos from YouTube, direct links, or local files to include them in your knowledge base.</p>
+            <div id="scrape-status" class="status" role="status"></div>
+           <div class="divider">
             <span>or</span>
         </div>
-        <form id="video-upload-form" class="upload-form" enctype="multipart/form-data">
-          <div class="form-group">
-              <input id="video-title" class="video-input" name="title" type="text" placeholder="Video Title" required />
-          </div>
-          <div class="form-group">
-              <select id="video-type" class="video-input" name="type" required>
-                  <option value="">Select Video Type</option>
-                  <option value="youtube">YouTube</option>
-                  <option value="direct">Direct Video Link</option>
-                  <option value="upload">File Upload</option>
-              </select>
-          </div>
-          <div class="form-group">
-              <input id="video-url" class="video-input" name="url" type="url" placeholder="Video URL (for YouTube or direct links)" />
-          </div>
-           <div class="form-group">
-              <input id="video-file-input" class="video-input" name="file" type="file" accept="video/*" />
-          </div>
-          <div class="form-group">
-              <textarea id="video-description" name="description" placeholder="Video Description (optional)"></textarea>
-          </div>
-          <button type="submit" id="video-submit-btn">Upload Video</button>
-      </form>
+          <form id="video-upload-form" class="upload-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <input id="video-title" class="video-input" name="title" type="text" placeholder="Video Title" style="width: 5px" required />
+            </div>
+            <div class="form-group">
+                <select id="video-type" class="video-input" name="type" required>
+                    <option value="">Select Video Type</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="direct">Direct Video Link</option>
+                    <option value="upload">File Upload</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <input id="video-url" class="video-input" name="url" type="url" placeholder="Video URL (for YouTube or direct links)" />
+            </div>
+            <div class="form-group">
+                <input id="video-file-input" class="video-input" name="file" type="file" accept="video/*" />
+            </div>
+            <div class="form-group">
+                <textarea id="video-description" name="description" placeholder="Description(optional)"></textarea>
+            </div>
+            <button type="submit" id="video-submit-btn">Upload Video</button>
+          </form>
+        </div>
         <div id="upload-video-status" class="status" role="status"></div>
         <div class="panel">
           <div class="panel-header">
@@ -74,6 +78,367 @@
       </section>
     </main>
 
-    <script src="/static/js/app.js?v=20251020" defer></script>
+    <script src="/static/js/app.js?v=202510234" defer></script>
+  </body>
+</html>
+ -->
+
+
+<!-- <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Elearning Assistant</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+    <style>
+      /* Additional styles for the dropdown selector */
+      .source-selector {
+        margin-bottom: 2rem;
+      }
+      
+      .source-dropdown {
+        width: 100%;
+        padding: 12px 16px;
+        font-size: 16px;
+        border: 2px solid #e1e5e9;
+        border-radius: 8px;
+        background: white;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      
+      .source-dropdown:focus {
+        outline: none;
+        border-color: #007bff;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+      }
+      
+      .form-section {
+        display: none;
+        animation: fadeIn 0.3s ease;
+      }
+      
+      .form-section.active {
+        display: block;
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .form-indicator {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding: 8px 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        font-weight: 500;
+        color: #495057;
+      }
+      
+      .form-indicator::before {
+        content: "📁";
+        margin-right: 8px;
+        font-size: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <img class="brand-mark" src="/static/logo.png" style="width: 100px; height: 100px" alt="MoH Logo" />
+          <h1>MoH E-Learning Assistant</h1>
+        </div>
+        <div class="header-actions">
+          <a class="header-link" href="/chat">Open Chat</a>
+        </div>
+      </header>
+
+      <section id="upload-view" class="view">
+        Source Type Selector -->
+        <!-- <div class="panel source-selector">
+          <h2>Add Learning Materials</h2>
+          <p class="panel-description">Choose the type of content you want to add to your knowledge base.</p>
+          
+          <select id="source-type" class="source-dropdown">
+            <option value="">Select Content Type...</option>
+            <option value="pdf">Upload PDF/Document</option>
+            <option value="video">Upload Video</option>
+            <option value="webscrape">Scrape Web Content</option>
+          </select>
+        </div>
+
+        <! <!PDF Upload Form -->
+        <!-- <section id="upload-view" class="view">
+          <div class="panel">
+            <h2>Add Sources</h2>
+            <p class="panel-description">Upload PDF reports, OCR-ready images, or scrape web pages to include them in your knowledge base.</p>
+            <form id="upload-form" class="upload-form">
+              <input id="file-input" name="file" type="file" accept="application/pdf,image/*" required />
+              <button type="submit">Upload File</button>
+            </form>
+            <div id="upload-status" class="status" role="status"></div>
+          </div>
+        </section>
+        <section id="scrape-view" class="view">
+          <div class="panel">
+            <form id="scrape-form" class="scrape-form">
+              <input id="url-input" name="url" type="url" placeholder="https://example.com/article" required />
+              <button type="submit">Scrape URL</button>
+            </form>
+          </div>
+       </section>
+       <section id="video-view" class="view">
+          <div class="video-panel">
+          <h2>Upload Video(s)</h2>
+          <p class="panel-description">Upload training videos from YouTube, direct links, or local files to include them in your knowledge base.</p>
+            <div id="scrape-status" class="status" role="status"></div>
+           <div class="divider">
+            <span>or</span>
+        </div>
+          <form id="video-upload-form" class="upload-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <input id="video-title" class="video-input" name="title" type="text" placeholder="Video Title" style="width: 5px" required />
+            </div>
+            <div class="form-group">
+                <select id="video-type" class="video-input" name="type" required>
+                    <option value="">Select Video Type</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="direct">Direct Video Link</option>
+                    <option value="upload">File Upload</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <input id="video-url" class="video-input" name="url" type="url" placeholder="Video URL (for YouTube or direct links)" />
+            </div>
+            <div class="form-group">
+                <input id="video-file-input" class="video-input" name="file" type="file" accept="video/*" />
+            </div>
+            <div class="form-group">
+                <textarea id="video-description" name="description" placeholder="Description(optional)"></textarea>
+            </div>
+            <button type="submit" id="video-submit-btn">Upload Video</button>
+          </form>
+        </div>
+       </section>
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Indexed Materials</h3>
+            <button id="refresh-docs" class="btn-secondary">Refresh List</button>
+          </div>
+          <ul id="document-list" class="document-list"></ul>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/js/app.js?v=202510234" defer></script>
+    <script>
+      // Dropdown functionality
+      document.addEventListener('DOMContentLoaded', function() {
+        const sourceType = document.getElementById('source-type');
+        const uploadView = document.getElementById('upload-view');
+        const scrapeView = document.getElementById('scrape-view');
+        const videoView = document.querySelector('.video-view');
+        
+        // Show/hide forms based on dropdown selection
+        sourceType.addEventListener('change', function() {
+          // Hide all forms
+          uploadView.classList.remove('active');
+          videoView.classList.remove('active');
+          scrapeView.classList.remove('active');
+          
+          // Show selected form
+          switch(this.value) {
+            case 'pdf':
+              uploadView.classList.add('active');
+              break;
+            case 'video':
+              videoView.classList.add('active');
+              break;
+            case 'webscrape':
+              scrapeView.classList.add('active');
+              break;
+          }
+        });
+        // Initialize - hide all forms initially
+        uploadView.classList.remove('active');
+        videoView.classList.remove('active');
+        scrapeView.classList.remove('active');
+      });
+    </script> -->
+  <!-- </body> 
+</html> -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Elearning Assistant</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+    <style>
+      /* Additional styles for the dropdown selector */
+      .source-selector {
+        margin-bottom: 2rem;
+      }
+      
+      .source-dropdown {
+        width: 100%;
+        padding: 12px 16px;
+        font-size: 16px;
+        border: 2px solid #e1e5e9;
+        border-radius: 8px;
+        background: white;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      
+      .source-dropdown:focus {
+        outline: none;
+        border-color: #007bff;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+      }
+      
+      .form-section {
+        display: none;
+        animation: fadeIn 0.3s ease;
+      }
+      
+      .form-section.active {
+        display: block;
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <img class="brand-mark" src="/static/logo.png" style="width: 100px; height: 100px" alt="MoH Logo" />
+          <h1>MoH E-Learning Assistant</h1>
+        </div>
+        <div class="header-actions">
+          <a class="header-link" href="/chat">Open Chat</a>
+        </div>
+      </header>
+
+      <section id="upload-view" class="view">
+        <!-- Source Type Selector -->
+        <div class="panel source-selector">
+          <h2>Add Learning Materials</h2>
+          <p class="panel-description">Choose the type of content you want to add to your knowledge base.</p>
+          
+          <select id="source-type" class="source-dropdown">
+            <option value="">Select Content Type...</option>
+            <option value="pdf">Upload PDF/Document</option>
+            <option value="video">Upload Video</option>
+            <option value="webscrape">Scrape Web Content</option>
+          </select>
+        </div>
+
+        <!-- PDF Upload Form -->
+        <div id="pdf-section" class="panel form-section">
+          <h2>Add Sources</h2>
+          <p class="panel-description">Upload PDF reports, OCR-ready images, or scrape web pages to include them in your knowledge base.</p>
+          <form id="upload-form" class="upload-form">
+            <input id="file-input" name="file" type="file" accept="application/pdf,image/*" required />
+            <button type="submit">Upload File</button>
+          </form>
+          <div id="upload-status" class="status" role="status"></div>
+        </div>
+
+        <!-- Web Scrape Form -->
+        <div id="webscrape-section" class="panel form-section">
+          <form id="scrape-form" class="scrape-form">
+            <input id="url-input" name="url" type="url" placeholder="https://example.com/article" required />
+            <button type="submit">Scrape URL</button>
+          </form>
+          <div id="scrape-status" class="status" role="status"></div>
+        </div>
+
+        <!-- Video Upload Form -->
+        <div id="video-section" class="video-panel form-section">
+          <h2>Upload Video(s)</h2>
+          <p class="panel-description">Upload training videos from YouTube, direct links, or local files to include them in your knowledge base.</p>
+          <form id="video-upload-form" class="upload-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <input id="video-title" class="video-input" name="title" type="text" placeholder="Video Title" required />
+            </div>
+            <div class="form-group">
+                <select id="video-type" class="video-input" name="type" required>
+                    <option value="">Select Video Type</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="direct">Direct Video Link</option>
+                    <option value="upload">File Upload</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <input id="video-url" class="video-input" name="url" type="url" placeholder="Video URL (for YouTube or direct links)" />
+            </div>
+            <div class="form-group">
+                <input id="video-file-input" class="video-input" name="file" type="file" accept="video/*" />
+            </div>
+            <div class="form-group">
+                <textarea id="video-description" name="description" placeholder="Description (optional)"></textarea>
+            </div>
+            <button type="submit" id="video-submit-btn">Upload Video</button>
+          </form>
+          <div id="upload-video-status" class="status" role="status"></div>
+        </div>
+
+        <!-- Document List (Always Visible) -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Indexed Materials</h3>
+            <button id="refresh-docs" class="btn-secondary">Refresh List</button>
+          </div>
+          <ul id="document-list" class="document-list"></ul>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/js/app.js?v=202510234" defer></script>
+    <script>
+      // Dropdown functionality
+      document.addEventListener('DOMContentLoaded', function() {
+        const sourceType = document.getElementById('source-type');
+        const pdfSection = document.getElementById('pdf-section');
+        const videoSection = document.getElementById('video-section');
+        const webscrapeSection = document.getElementById('webscrape-section');
+        
+        // Show/hide forms based on dropdown selection
+        sourceType.addEventListener('change', function() {
+          // Hide all forms
+          pdfSection.classList.remove('active');
+          videoSection.classList.remove('active');
+          webscrapeSection.classList.remove('active');
+          
+          // Show selected form
+          switch(this.value) {
+            case 'pdf':
+              pdfSection.classList.add('active');
+              break;
+            case 'video':
+              videoSection.classList.add('active');
+              break;
+            case 'webscrape':
+              webscrapeSection.classList.add('active');
+              break;
+          }
+        });
+        
+        // Initialize - hide all forms initially
+        pdfSection.classList.remove('active');
+        videoSection.classList.remove('active');
+        webscrapeSection.classList.remove('active');
+      });
+    </script>
   </body>
 </html>
