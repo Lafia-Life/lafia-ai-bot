@@ -14,7 +14,10 @@ import functools
 import time
 import asyncio
 from starlette.requests import Request  
+import threading
 
+
+cache_lock = threading.Lock()
 user_state = {}
 app = FastAPI()
 user_state = {}
@@ -35,6 +38,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount("/storage/uploads", StaticFiles(directory="storage/uploads"), name="storage_uploads")
 
 def escape_xml(text: str) -> str:
     return (text.replace('&', '&amp;')
@@ -44,7 +48,7 @@ def escape_xml(text: str) -> str:
                .replace("'", '&apos;'))
 
 def get_document_file_path(document_id: str):
-    """Get the actual file path from document_id - OPTIMIZED VERSION"""
+    """Get the actual file path from document_id - THOROUGH VERSION"""
     # Check cache first
     if document_id in document_path_cache:
         cached_result = document_path_cache[document_id]
@@ -68,25 +72,40 @@ def get_document_file_path(document_id: str):
         
         filename = getattr(found_doc, 'filename', 'document.pdf')
         
-        # FAST PATH: Check most common location first
-        common_paths = [
+        # THOROUGH: Check ALL possible locations and patterns
+        possible_paths = [
             # Most likely location - UUID_filename pattern
             f"storage/uploads/{document_id}_{filename}",
-            # Second most likely - direct filename
+            # Direct filename in uploads
             f"storage/uploads/{filename}",
+            # Document ID as filename with PDF extension
+            f"storage/uploads/{document_id}.pdf",
+            f"storage/uploads/{document_id}.PDF",
             # Check document attributes
             getattr(found_doc, 'file_path', None),
+            # Check in parent directories
+            f"uploads/{filename}",
+            f"../storage/uploads/{filename}",
+            # Check in chroma directories
+            f"storage/chroma/documents/{document_id}_{filename}",
+            f"storage/chroma/uploads/{document_id}_{filename}",
+            f"storage/chroma/{document_id}_{filename}",
         ]
         
-        for path in common_paths:
-            if path and os.path.exists(path):
+        for path in possible_paths:
+            if path and os.path.exists(path) and os.path.isfile(path):
                 file_size = os.path.getsize(path)
-                if file_size > 1000:  # Reasonable minimum size
+                if file_size > 100:  # Reduced minimum size
                     result = (path, filename)
                     document_path_cache[document_id] = result
+                    print(f"✅ Found PDF file: {path}")
                     return result
         
-        # If not found in common locations, return None quickly
+        # If not found, log all the paths we checked
+        print(f"❌ PDF not found for document_id: {document_id}")
+        print(f"   Filename: {filename}")
+        print(f"   Checked paths: {[p for p in possible_paths if p]}")
+        
         document_path_cache[document_id] = (None, filename)
         return None, filename
         
@@ -95,21 +114,23 @@ def get_document_file_path(document_id: str):
         return None, None
 
 def get_available_courses():
-    """Get courses from both documents AND videos - FILTERS MISSING FILES"""
+    """Get courses from both documents AND videos - FIXED VERSION"""
     global courses_cache, courses_cache_timestamp
     
-    # Return cached version if recent
+    # Return cached version if recent (thread-safe check)
     current_time = time.time()
-    if current_time - courses_cache_timestamp < CACHE_DURATION and courses_cache:
-        return courses_cache
-    
+    with cache_lock:
+        if current_time - courses_cache_timestamp < CACHE_DURATION and courses_cache:
+            return courses_cache.copy()
+
+    # If cache expired or empty, rebuild it
     all_docs = document_store.list()
     all_videos = video_store.list()
     
     courses = {}
-    base_url = "https://5f15b1ed7c02.ngrok-free.app"
+    base_url = "https://f19d4f372e4e.ngrok-free.app"
     
-    # Use cached file paths when possible - FILTER OUT MISSING FILES
+    # Build courses with documents
     for doc in all_docs:
         course_id = getattr(doc, 'course_id', None) 
         if not course_id:
@@ -129,22 +150,18 @@ def get_available_courses():
         filename = getattr(doc, 'filename', 'Unknown Document')
         
         if doc_id:
-            # Use cached path if available - ONLY ADD IF FILE EXISTS
-            file_path = document_path_cache.get(doc_id, (None, None))[0]
+            file_path, _ = get_document_file_path(doc_id)
             file_exists = file_path and os.path.exists(file_path)
             
-            # Only add to courses if file actually exists
             if file_exists:
                 courses[course_id]['pdfs'].append({
                     'filename': filename,
                     'download_url': f"/webhook/documents/{doc_id}/download",
                     'document_id': doc_id,
-                    'file_exists': file_exists
+                    'file_exists': True
                 })
-            # else:
-            #     print(f"🚫 Filtered out missing PDF: {filename}")
-    
-    # Process videos (your existing video code here)
+
+    # IMPROVED: Process videos - ONLY ADD VIDEOS THAT HAVE WORKING URLs
     for video in all_videos:
         course_id = getattr(video, 'course_id', None)
         if not course_id:
@@ -167,55 +184,139 @@ def get_available_courses():
         
         final_url = None
         video_type = None
+        file_exists = False
         
+        # Handle direct URLs first (YouTube, external URLs)
         if existing_url:
-            if existing_url.startswith('/'):
-                filename = os.path.basename(existing_url)
-                final_url = f"{base_url}/serve-video/{filename}"
-                video_type = 'uploaded'
-            elif 'youtube.com' in existing_url or 'youtu.be' in existing_url:
+            if 'youtube.com' in existing_url or 'youtu.be' in existing_url:
                 video_type = 'youtube'
                 final_url = existing_url
+                file_exists = True  # YouTube URLs always work
+                print(f"✅ Added YouTube video: {video_title}")
             else:
+                # For other direct URLs, we assume they work
                 video_type = 'direct'
                 final_url = existing_url
-        elif file_path and os.path.exists(file_path):
+                file_exists = True
+                print(f"✅ Added direct URL video: {video_title}")
+        
+        # Handle uploaded videos with file paths - ONLY IF FILE EXISTS
+        elif file_path:
+            # Normalize the file path
             file_path = os.path.normpath(file_path)
             filename = os.path.basename(file_path)
-            final_url = f"{base_url}/serve-video/{filename}"
-            video_type = 'uploaded'
+            
+            # Check if file exists in the stored location
+            if os.path.exists(file_path):
+                final_url = f"{base_url}/serve-video/{filename}"
+                video_type = 'uploaded'
+                file_exists = True
+                print(f"✅ Added uploaded video (file exists): {video_title} -> {file_path}")
+            else:
+                # File doesn't exist in stored location, try to find it
+                print(f"⚠️ Video file not found at stored path: {file_path}")
+                
+                # Try to find the file in common locations
+                possible_locations = [
+                    f"storage/uploads/{filename}",
+                    f"storage/chroma/videos/{filename}",
+                    f"storage/chroma/documents/{filename}",
+                    f"storage/chroma/uploads/{filename}",
+                    f"storage/chroma/{filename}",
+                    f"uploads/{filename}",
+                ]
+                
+                for location in possible_locations:
+                    if os.path.exists(location):
+                        final_url = f"{base_url}/serve-video/{filename}"
+                        video_type = 'uploaded'
+                        file_exists = True
+                        print(f"✅ Found video in alternate location: {location}")
+                        break
         
-        if final_url and video_type:
+        # If we still don't have a URL, try to construct one from video_id - BUT CHECK FILE EXISTS
+        if not final_url and video_id:
+            # Try common video extensions
+            video_extensions = ['.mp4', '.avi', '.mov', '.mkv']
+            for ext in video_extensions:
+                potential_filenames = [
+                    f"{video_id}{ext}",
+                    f"{video_id}_{video_title}{ext}" if video_title != 'Unknown Video' else None,
+                    f"{video_id}_video{ext}",
+                ]
+                
+                for potential_filename in potential_filenames:
+                    if potential_filename:
+                        # Check if this file actually exists before creating URL
+                        possible_paths = [
+                            f"storage/uploads/{potential_filename}",
+                            f"storage/chroma/videos/{potential_filename}",
+                            f"storage/chroma/documents/{potential_filename}",
+                            f"storage/chroma/uploads/{potential_filename}",
+                            f"storage/chroma/{potential_filename}",
+                            f"uploads/{potential_filename}",
+                        ]
+                        
+                        for check_path in possible_paths:
+                            if os.path.exists(check_path):
+                                final_url = f"{base_url}/serve-video/{potential_filename}"
+                                video_type = 'uploaded'
+                                file_exists = True
+                                print(f"✅ Found video by constructed filename: {check_path}")
+                                break
+                        if file_exists:
+                            break
+                if file_exists:
+                    break
+        
+        # ONLY add the video if we have a valid URL AND the file exists (or it's a direct URL)
+        if final_url and video_type and file_exists:
             courses[course_id]['videos'].append({
                 'url': final_url,
                 'title': video_title,
                 'type': video_type,
                 'video_id': video_id,
             })
+            print(f"✅ FINAL - Added video: {video_title}")
+        else:
+            print(f"❌ FINAL - Skipping video (no valid URL/file): {video_title} (ID: {video_id})")
+
+    # Update cache thread-safely
+    with cache_lock:
+        courses_cache = courses
+        courses_cache_timestamp = current_time
     
-    # Cache the result
-    courses_cache = courses
-    courses_cache_timestamp = current_time
+    print(f"📊 Final courses data: {len(courses)} courses")
+    for course_id, course_data in courses.items():
+        print(f"  - {course_data['name']}: {len(course_data['videos'])} videos, {len(course_data['pdfs'])} PDFs")
+    
     return courses
 
-
 def create_pdf_download_response(pdfs, course_name, base_url):
+    """Create PDF response - ONLY SHOW AVAILABLE FILES"""
+    # Filter to only include PDFs that actually exist
+    available_pdfs = []
     
-    # Filter out PDFs that don't have files
-    valid_pdfs = [pdf for pdf in pdfs if pdf.get('file_exists', True)]
+    for pdf in pdfs:
+        document_id = pdf.get('document_id')
+        if document_id:
+            file_path, _ = get_document_file_path(document_id)
+            if file_path and os.path.exists(file_path):
+                available_pdfs.append(pdf)
     
-    if not valid_pdfs:
+    print(f"📊 PDF Response: {len(available_pdfs)} available out of {len(pdfs)} total")
+    
+    if not available_pdfs:
         response_text = "❌ No PDFs available for this course (files not found)."
         escaped_text = escape_xml(response_text)
         return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
     
-    # If there's only one PDF, send it directly as a file
-    if len(valid_pdfs) == 1:
-        pdf = valid_pdfs[0]
+    # If there's only one PDF, send it directly
+    if len(available_pdfs) == 1:
+        pdf = available_pdfs[0]
         document_id = pdf.get('document_id')
         
         if document_id:
-            # FIX: Use the correct URL path including /webhook
             file_url = f"{base_url}/webhook/documents/{document_id}/download"
             filename = pdf.get('filename', 'document.pdf')
             
@@ -225,32 +326,23 @@ def create_pdf_download_response(pdfs, course_name, base_url):
                     <Body>📄 {escape_xml(course_name)} - {escape_xml(filename)}</Body>
                     <Media>{escape_xml(file_url)}</Media>
                 </Message>
-                <Message>
-                    <Body>💡 The PDF has been sent. You can:\\n• Tap to view it in WhatsApp\\n• Use the download icon to save it\\n• Share it with others\\n\\n💡 Navigation:\\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit</Body>
-                </Message>
             </Response>'''
-                
-    # If multiple PDFs, list them with direct file links
-    messages_xml = []
-    messages_xml.append(f'<Message><Body>📚 {course_name} - Available PDFs:</Body></Message>')
     
-    for i, pdf in enumerate(valid_pdfs, 1):
+    # Send all available PDFs
+    messages_xml = []
+    messages_xml.append(f'<Message><Body>📚 {course_name} - Available PDFs ({len(available_pdfs)}):</Body></Message>')
+    
+    for i, pdf in enumerate(available_pdfs, 1):
         filename = pdf.get('filename', f'Document {i}')
         document_id = pdf.get('document_id')
         
         if document_id:
-            # FIX: Use correct URL path including /webhook
             file_url = f"{base_url}/webhook/documents/{document_id}/download"
             message_xml = f'''<Message>
-        <Body>📄 {filename}</Body>
-        <Media>{escape_xml(file_url)}</Media>
-    </Message>'''
+                <Body>📄 {filename}</Body>
+                <Media>{escape_xml(file_url)}</Media>
+            </Message>'''
             messages_xml.append(message_xml)
-    
-    # Add navigation message
-    messages_xml.append('''<Message>
-        <Body>💡 Each PDF has been sent separately. Tap any file to view it in WhatsApp or use the download icon to save it.\\n\\n💡 Navigation:\\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit</Body>
-    </Message>''')
     
     return f'''<?xml version="1.0" encoding="UTF-8"?>
     <Response>
@@ -294,9 +386,9 @@ async def download_document(document_id: str):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail="Internal server error")
-    
-def create_smart_video_response(video_urls, course_name, base_url: str = "https://5f15b1ed7c02.ngrok-free.app"):
-    """Create response that sends VIDEO files directly to WhatsApp - URLs are already absolute"""
+
+def create_smart_video_response(video_urls, course_name, base_url: str = "https://f19d4f372e4e.ngrok-free.app"):
+    """Create response that sends VIDEO files directly to WhatsApp - WITH TITLES BELOW VIDEOS"""
     if not video_urls:
         response_text = "❌ No videos available for this course."
         escaped_text = escape_xml(response_text)
@@ -304,25 +396,25 @@ def create_smart_video_response(video_urls, course_name, base_url: str = "https:
     
     messages_xml = []
     
-    # Send the list of videos first
+    # Send the list of videos first (optional header)
     video_list = "🎥 " + course_name + " - Available Videos:\n\n"
     for i, video in enumerate(video_urls, 1):
         video_list += f"{i}. {video.get('title', f'Video {i}')}\n"
     
     messages_xml.append(f'<Message><Body>{escape_xml(video_list)}</Body></Message>')
         
-    # Send each video in a SEPARATE message with proper media
+    # Send each video in a SEPARATE message with title BELOW the video (like PDFs)
     for i, video in enumerate(video_urls, 1):
         video_title = video.get('title', f'Video {i}')
         video_url = video.get('url', '')
         escaped_url = escape_xml(video_url)
         escaped_title = escape_xml(video_title)
         
-        # Create SEPARATE message for each video with proper media
+        # Create SEPARATE message for each video with Media FIRST, then Body (title below)
         message_xml = f'''<Message>
-    <Body>🎥 {escaped_title}</Body>
-    <Media>{escaped_url}</Media>
-    </Message>'''
+            <Media>{escaped_url}</Media>
+            <Body>🎥 {escaped_title}</Body>
+        </Message>'''   
         messages_xml.append(message_xml)
 
     # Add navigation message at the end
@@ -666,7 +758,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     # Step 7: ENROLLED COURSE ACTIONS
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"enrolled_{course_id}":
-            base_url = "https://5f15b1ed7c02.ngrok-free.app"
+            base_url = "https://f19d4f372e4e.ngrok-free.app"
             if user_msg == "1":
                 pdfs = course_data["pdfs"]
                 course_name = course_data["name"]
@@ -907,42 +999,11 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 response_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_error}</Message></Response>'
                 return Response(content=response_xml, media_type="application/xml")
             
-@app.get("/debug/whatsapp-documents")
-async def debug_whatsapp_documents():
-    """Debug endpoint to check WhatsApp document availability"""
-    courses = get_available_courses()
-    debug_info = {
-        "base_url": "https://5f15b1ed7c02.ngrok-free.app",
-        "total_courses": len(courses),
-        "courses": {}
-    }
-    
-    for course_id, course_data in courses.items():
-        debug_info["courses"][course_id] = {
-            'name': course_data['name'],
-            'pdf_count': len(course_data['pdfs']),
-            'pdfs': []
-        }
-        
-        for pdf in course_data['pdfs']:
-            document_id = pdf.get('document_id')
-            file_path, filename = get_document_file_path(document_id)
-            
-            debug_info["courses"][course_id]['pdfs'].append({
-                'document_id': document_id,
-                'filename': pdf.get('filename'),
-                'file_exists': os.path.exists(file_path) if file_path else False,
-                'file_path': file_path,
-                'download_url': f"https://5f15b1ed7c02.ngrok-free.app/webhook/documents/{document_id}/download",
-                'whatsapp_media_url': f"https://5f15b1ed7c02.ngrok-free.app/webhook/documents/{document_id}/download"
-            })
-    
-    return debug_info
 
 async def background_cache_refresh():
     """Periodically refresh document cache"""
     while True:
-        await asyncio.sleep(300)  # Refresh every 5 minutes
+        await asyncio.sleep(300) 
         all_docs = document_store.list()
         for doc in all_docs:
             doc_id = getattr(doc, 'document_id', None)
@@ -977,99 +1038,22 @@ async def add_cache_headers(request: Request, call_next):
     
     return response
 
-@app.get("/cleanup/missing-files")
-async def cleanup_missing_files_get():
-    """GET endpoint to identify missing files (we can't delete from document store)"""
-    all_docs = document_store.list()
-    missing_count = 0
-    found_count = 0
-    missing_docs = []
-    found_docs = []
-        
-    for doc in all_docs:
-        doc_id = getattr(doc, 'document_id', None)
-        filename = getattr(doc, 'filename', 'Unknown')
-        
-        if doc_id:
-            file_path, found_filename = get_document_file_path(doc_id)
-            if not file_path or not os.path.exists(file_path):
-                missing_count += 1
-                missing_docs.append({
-                    'document_id': doc_id,
-                    'filename': filename,
-                    'reason': 'File not found on disk'
-                })
-            else:
-                found_count += 1
-                found_docs.append({
-                    'document_id': doc_id,
-                    'filename': filename,
-                    'file_path': file_path
-                })    
-    return {
-        "missing_count": missing_count,
-        "found_count": found_count,
-        "missing_documents": missing_docs,
-        "found_documents": found_docs,
-        "message": f"Found {found_count} documents with files, {missing_count} documents missing files",
-        "note": "Cannot delete from document store - missing entries will be filtered in WhatsApp responses"
-    }
-
-@app.get("/cleanup/test")
-async def cleanup_test():
-    """Test endpoint to see what would be cleaned up"""
-    all_docs = document_store.list()
-    would_remove = []
-    would_keep = []
+@app.post("/cache/reset")
+async def reset_cache():
+    """Manually reset all caches"""
+    global courses_cache, courses_cache_timestamp, document_path_cache
     
-    for doc in all_docs:
-        doc_id = getattr(doc, 'document_id', None)
-        filename = getattr(doc, 'filename', 'Unknown')
-        
-        if doc_id:
-            file_path, found_filename = get_document_file_path(doc_id)
-            if not file_path or not os.path.exists(file_path):
-                would_remove.append({
-                    'document_id': doc_id,
-                    'filename': filename
-                })
-            else:
-                would_keep.append({
-                    'document_id': doc_id,
-                    'filename': filename,
-                    'file_path': file_path
-                })
+    with cache_lock:
+        courses_cache = {}
+        courses_cache_timestamp = 0
+        document_path_cache.clear()
     
     return {
-        "would_remove_count": len(would_remove),
-        "would_keep_count": len(would_keep),
-        "would_remove": would_remove,
-        "would_keep": would_keep
-    }
-
-@app.get("/debug/whatsapp-pdfs")
-async def debug_whatsapp_pdfs():
-    """Debug exactly what PDFs WhatsApp sees"""
-    courses = get_available_courses()
-    
-    debug_info = {
-        "all_courses": {},
-        "whatsapp_responses": {}
-    }
-    
-    for course_id, course_data in courses.items():
-        debug_info["all_courses"][course_id] = {
-            'name': course_data['name'],
-            'raw_pdf_count': len(course_data['pdfs']),
-            'pdfs': course_data['pdfs']
+        "message": "All caches reset successfully",
+        "courses_cache_cleared": True,
+        "document_path_cache_cleared": True,
+        "cache_sizes": {
+            "courses_cache": 0,
+            "document_path_cache": 0
         }
-        
-        # Test the create_pdf_download_response function
-        base_url = "https://5f15b1ed7c02.ngrok-free.app"
-        pdf_response = create_pdf_download_response(course_data['pdfs'], course_data['name'], base_url)
-        
-        debug_info["whatsapp_responses"][course_id] = {
-            'response_xml': pdf_response
-        }
-    
-    return debug_info
+    }

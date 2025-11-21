@@ -448,42 +448,49 @@ async def upload_video(
         print(f"Video storage error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/serve-video/{filename}")
 @app.head("/serve-video/{filename}")
-async def serve_video(filename: str, request: Request):
-    """Serve video files - with HEAD method support"""
-    print(f"🎬 SERVE VIDEO REQUEST: {request.method} {filename}")
-    
-    safe_filename = os.path.basename(filename)
-    file_path = os.path.join("storage", "uploads", safe_filename)
-    absolute_path = os.path.abspath(file_path)
-    
-    if not os.path.exists(absolute_path):
-        raise HTTPException(status_code=404, detail=f"Video file not found: {safe_filename}")
-    
-    file_size = os.path.getsize(absolute_path)
-    print(f"✅ FOUND VIDEO: {absolute_path} ({file_size} bytes)")
-    
-    headers = {
-        'Content-Type': 'video/mp4',
-        'Content-Length': str(file_size),
-        'Content-Disposition': f'inline; filename="{safe_filename}"',
-        'Cache-Control': 'no-cache',
-        'Accept-Ranges': 'bytes'
-    }
-    
-    # If HEAD request, return headers only
-    if request.method == "HEAD":
-        return Response(headers=headers)
-    
-    # If GET request, return the file
-    return FileResponse(
-        path=absolute_path,
-        media_type='video/mp4',
-        filename=safe_filename,
-        headers=headers
-    )
+async def serve_video(filename: str):
+    """Serve video files from multiple locations"""
+    try:
+        # Look for video in ALL possible locations from your debug data
+        possible_paths = [
+            f"storage/uploads/{filename}",
+            f"uploads/{filename}",
+            f"storage/uploads/{filename}",
+            # Also try with just the filename part after last underscore
+            f"storage/uploads/{filename.split('_')[-1]}" if '_' in filename else None,
+        ]
+        
+        for file_path in possible_paths:
+            if file_path and os.path.exists(file_path) and os.path.isfile(file_path):
+                # Determine content type
+                if filename.lower().endswith('.mp4'):
+                    media_type = 'video/mp4'
+                elif filename.lower().endswith('.avi'):
+                    media_type = 'video/avi'
+                elif filename.lower().endswith('.mov'):
+                    media_type = 'video/quicktime'
+                else:
+                    media_type = 'video/mp4'  # default
+                
+                print(f"✅ Serving video from: {file_path}")
+                return FileResponse(
+                    path=file_path,
+                    filename=filename,
+                    media_type=media_type,
+                    headers={
+                        'Content-Disposition': f'inline; filename="{filename}"',
+                        'Cache-Control': 'public, max-age=3600'
+                    }
+                )
+        
+        print(f"❌ Video not found: {filename}")
+        raise HTTPException(status_code=404, detail="Video not found")
+        
+    except Exception as e:
+        print(f"❌ Error serving video {filename}: {e}")
+        raise HTTPException(status_code=500, detail="Error serving video")
 
 @app.get("/debug/document-status/{document_id}")
 async def debug_document_status(document_id: str, store: DocumentStore = Depends(get_document_store)):
