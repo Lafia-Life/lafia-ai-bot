@@ -35,7 +35,6 @@ class VideoStore:
         destination = self._uploads_path / f"{video_id}_{safe_name}"
         destination.write_bytes(video_bytes)
         
-        print(f"💾 Video saved to documents uploads folder: {destination}")
         return destination
 
 

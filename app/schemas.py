@@ -4,6 +4,37 @@ from pydantic import BaseModel, HttpUrl
 from enum import Enum
 
 
+class CourseCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    code: Optional[str] = None
+    is_active: bool = True
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class CourseUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    code: Optional[str] = None
+    is_active: Optional[bool] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class Course(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    code: Optional[str] = None
+    is_active: bool = True
+    created_by: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    material_count: Optional[dict] = None
+    class Config:
+        from_attributes = True
+
 class ResourceType(str, Enum):
     PDF = "pdf"
     VIDEO = "video"
@@ -22,6 +53,7 @@ class DocumentSummary(BaseModel):
     page_count: int = 0
     source_type: str = "pdf"
     url: Optional[str] = None
+    course_id: Optional[str]=None
 
 
 class UploadResponse(BaseModel):
@@ -43,7 +75,7 @@ class VideoSummary(BaseModel):
     file_path: Optional[str] = None
     created_at: str 
     duration: Optional[str] = None
-
+    course_id: Optional[str]=None
 
 class UploadResponse(BaseModel):
     document: DocumentSummary
@@ -138,3 +170,24 @@ class VideoResource(BaseModel):
     description: Optional[str] = None
     file_url: Optional[HttpUrl] = None
     upload_date: Optional[str] = None  # ISO formatted date string
+
+class UserRegistration(BaseModel):
+    phone_number: str
+    name: str
+    email: Optional[str] = None
+    district: Optional[str] = None
+    job_title: Optional[str] = None
+    organization: Optional[str] = None
+    password: str
+    student_no: Optional[str]= None
+    registered_at: datetime = datetime.now()
+
+class Enrollment(BaseModel):
+    id: str
+    student_number: str
+    course_id: str
+    course_name: str
+    enrolled_at: datetime
+    completed_at: Optional[datetime] = None
+    progress: float = 0.0  # 0.0 to 1.0
+    is_active: bool = True

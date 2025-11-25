@@ -6,27 +6,28 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 import uuid
-import glob
 import os
 from datetime import datetime
-from typing import Optional
-from app.config import Settings, get_openai_api_key, get_settings
-from app.schemas import VideoSummary,ChatRequest, DocumentSummary, ScrapeRequest, UploadResponse, SMSWebhookRequest, SMSResponse
+from typing import Optional,List
+from app.config import get_openai_api_key, get_settings
+from app.schemas import VideoSummary,VideoUploadResponse, VideoType, ChatRequest, DocumentSummary, ScrapeRequest, UploadResponse, Course, CourseCreate, CourseUpdate, SMSResponse
 from app.services.document_store import DocumentStore
 from app.services.video_store import VideoStore
 from app.services.ingestion import ingest_document, ingest_web_page
 from app.services.retrieval import stream_answer, answer_question
 from app.services.sms_service import send_sms_response, parse_incoming_sms
 from app.whatsapp_chat import app as whatsapp_app
-from app.schemas import VideoUploadRequest,VideoResource, VideoUploadResponse, VideoType, VideoSummary
 from starlette.requests import Request
-from starlette.responses import Response
-from app.whatsapp_chat import get_document_file_path
+from app.services.video_store  import VideoStore
+from app.services.course_store import CourseStore
 
 
-
+course_store = CourseStore(Path("storage/data"))
 app = FastAPI(title="PDF Chat Assistant")
 app.mount("/webhook", whatsapp_app)
+settings = get_settings()
+document_store = DocumentStore(settings.chroma_path)
+video_store = VideoStore(settings.chroma_path)
 
 
 settings = get_settings()
@@ -36,7 +37,6 @@ templates = Jinja2Templates(directory="templates")
 
 def get_document_store() -> DocumentStore:
     return DocumentStore(settings.chroma_path)
-
 
 def _resolve_document_path(document_id: str, store: DocumentStore) -> tuple[DocumentSummary, Path]:
     summary = store.get(document_id)
@@ -74,6 +74,7 @@ def list_documents(store: DocumentStore = Depends(get_document_store)) -> list[D
 @app.post("/api/documents", response_model=UploadResponse)
 def upload_document(
     file: UploadFile = File(...),
+    course_id: Optional[str] = Form(None),
 ) -> UploadResponse:
     contents = file.file.read()
     if not contents:
@@ -83,6 +84,7 @@ def upload_document(
         upload_bytes=contents,
         filename=file.filename,
         content_type=file.content_type,
+        course_id=course_id,  # Pass course_id to your ingest function
     )
     return response
 
@@ -368,8 +370,6 @@ def debug_storage_layout():
     # Check where documents are actually stored
     print("\n🔍 DOCUMENT STORAGE LOCATION:")
     settings = get_settings()
-    print(f"Chroma path: {settings.chroma_path}")
-    print(f"Chroma path exists: {settings.chroma_path.exists()}")
     
 @app.post("/api/videos", response_model=VideoUploadResponse)
 async def upload_video(
@@ -377,12 +377,12 @@ async def upload_video(
     title: str = Form(...),
     url: Optional[str] = Form(None),
     type: str = Form(...),
-    description: Optional[str] = Form("")
+    description: Optional[str] = Form(""),
+    course_id: Optional[str] = Form(None),
+
 ):
     """Upload a video - store it in the same uploads folder as documents"""
-    try:
-        print(f"🎬 Video storage request: {title}")
-        
+    try:        
         # Debug storage layout first
         debug_storage_layout()
         
@@ -402,10 +402,8 @@ async def upload_video(
             video_bytes = await file.read()
             filename = file.filename
             mime_type = file.content_type or 'video/mp4'
-            print(f"💾 Storing video file: {filename} ({len(video_bytes)} bytes)")
         else:
             mime_type = 'video/mp4'
-            print(f"🔗 Storing video URL: {url}")
         
         # Convert string type to VideoType enum
         try:
@@ -431,14 +429,12 @@ async def upload_video(
             file_path=str(saved_path),
             mime_type=mime_type,
             created_at=datetime.now().isoformat(), 
-            duration=None
+            duration=None,
+            course_id=course_id
         )
-        
         # Store in VideoStore
         video_store.upsert(video_summary)
-        
-        print(f"✅ Video stored in documents uploads folder: {saved_path}")
-        
+                
         return VideoUploadResponse(
             video=video_summary,
             message=f"Video '{title}' stored successfully"
@@ -451,86 +447,48 @@ async def upload_video(
 @app.get("/serve-video/{filename}")
 @app.head("/serve-video/{filename}")
 async def serve_video(filename: str):
-    """Serve video files from multiple locations"""
+    """Serve video files directly - FIXED VERSION"""
     try:
-        # Look for video in ALL possible locations from your debug data
+        # Check multiple possible locations for the video file
         possible_paths = [
             f"storage/uploads/{filename}",
+            f"storage/chroma/videos/{filename}",
+            f"storage/chroma/documents/{filename}",
+            f"storage/chroma/uploads/{filename}",
+            f"storage/chroma/{filename}",
             f"uploads/{filename}",
-            f"storage/uploads/{filename}",
-            # Also try with just the filename part after last underscore
-            f"storage/uploads/{filename.split('_')[-1]}" if '_' in filename else None,
         ]
         
-        for file_path in possible_paths:
-            if file_path and os.path.exists(file_path) and os.path.isfile(file_path):
-                # Determine content type
-                if filename.lower().endswith('.mp4'):
-                    media_type = 'video/mp4'
-                elif filename.lower().endswith('.avi'):
-                    media_type = 'video/avi'
-                elif filename.lower().endswith('.mov'):
-                    media_type = 'video/quicktime'
-                else:
-                    media_type = 'video/mp4'  # default
-                
-                print(f"✅ Serving video from: {file_path}")
-                return FileResponse(
-                    path=file_path,
-                    filename=filename,
-                    media_type=media_type,
-                    headers={
-                        'Content-Disposition': f'inline; filename="{filename}"',
-                        'Cache-Control': 'public, max-age=3600'
-                    }
-                )
+        video_path = None
+        for path in possible_paths:
+            if os.path.exists(path) and os.path.isfile(path):
+                video_path = path
+                print(f"✅ Found video at: {video_path}")
+                break
         
-        print(f"❌ Video not found: {filename}")
-        raise HTTPException(status_code=404, detail="Video not found")
+        if not video_path:
+            print(f"❌ Video not found: {filename}")
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Get file size and check if it's a valid video
+        file_size = os.path.getsize(video_path)
+        if file_size < 100:  # Too small to be a real video
+            print(f"❌ Video file too small: {file_size} bytes")
+            raise HTTPException(status_code=404, detail="Invalid video file")
+        
+        print(f"✅ Serving video: {filename} ({file_size} bytes)")
+        
+        return FileResponse(
+            path=video_path,
+            filename=filename,
+            media_type='video/mp4',  # Explicitly set media type
+            headers={
+                'Content-Type': 'video/mp4',
+                'Accept-Ranges': 'bytes',
+                'Cache-Control': 'public, max-age=3600'
+            }
+        )
         
     except Exception as e:
         print(f"❌ Error serving video {filename}: {e}")
         raise HTTPException(status_code=500, detail="Error serving video")
-
-@app.get("/debug/document-status/{document_id}")
-async def debug_document_status(document_id: str, store: DocumentStore = Depends(get_document_store)):
-    """Debug endpoint to check document status"""
-    try:
-        print(f"🔍 DEBUG: Looking for document_id: {document_id}")
-        
-        # Try to get the document
-        summary = store.get(document_id)
-        if not summary:
-            return {
-                "document_id": document_id,
-                "found_in_database": False,
-                "error": "Document not found in database"
-            }
-        
-        print(f"✅ DEBUG: Found in database: {summary.filename}")
-        
-        # Try to resolve file path
-        try:
-            summary, file_path = _resolve_document_path(document_id, store)
-            return {
-                "document_id": document_id,
-                "found_in_database": True,
-                "filename": summary.filename,
-                "file_path": str(file_path),
-                "file_exists": file_path.exists(),
-                "file_size": file_path.stat().st_size if file_path.exists() else 0,
-                "source_type": summary.source_type
-            }
-        except Exception as path_error:
-            return {
-                "document_id": document_id,
-                "found_in_database": True,
-                "filename": summary.filename,
-                "error": f"File path resolution failed: {str(path_error)}"
-            }
-            
-    except Exception as e:
-        return {
-            "document_id": document_id,
-            "error": f"Unexpected error: {str(e)}"
-        }

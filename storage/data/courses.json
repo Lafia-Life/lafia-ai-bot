@@ -1,0 +1,24 @@
+{
+  "6938c81b-9a9e-42a1-b15d-0bab70a9f0e4": {
+    "id": "6938c81b-9a9e-42a1-b15d-0bab70a9f0e4",
+    "title": "ehehehehehe",
+    "description": "hjfegfbhegjgegigerg",
+    "code": "HIV-101",
+    "is_active": true,
+    "created_by": null,
+    "created_at": "2025-11-23T06:53:04.434588",
+    "updated_at": "2025-11-23T06:53:04.434588",
+    "material_count": null
+  },
+  "a803345f-d092-4131-8330-aaf5fedd6498": {
+    "id": "a803345f-d092-4131-8330-aaf5fedd6498",
+    "title": "Hiv prevention and control",
+    "description": "Hiv prevention and control",
+    "code": "HIV-101",
+    "is_active": true,
+    "created_by": null,
+    "created_at": "2025-11-23T06:58:21.772740",
+    "updated_at": "2025-11-23T06:58:21.772740",
+    "material_count": null
+  }
+}
