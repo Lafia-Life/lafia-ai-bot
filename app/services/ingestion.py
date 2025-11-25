@@ -71,6 +71,7 @@ def _build_chunk_payload(
     chunk_size: int,
     chunk_overlap: int,
     source_type: str,
+    course_id: Optional[str] = None
 ) -> Tuple[List[str], List[dict], List[str]]:
     texts: List[str] = []
     metadatas: List[dict] = []
@@ -81,17 +82,29 @@ def _build_chunk_payload(
         for local_index, chunk in enumerate(page_chunks):
             chunk_id = f"{document_id}_{page_number}_{local_index}"
             texts.append(chunk)
-            metadatas.append(
-                {
-                    "document_id": document_id,
-                    "filename": filename,
-                    "page_start": page_number,
-                    "page_end": page_number,
-                    "chunk": local_index,
-                    "url": "",
-                    "source_type": source_type,
-                }
-            )
+            metadata = {
+                "document_id": document_id,
+                "filename": filename,
+                "page_start": page_number,
+                "page_end": page_number,
+                "chunk": local_index,
+                "url": "",
+                "source_type": source_type,
+            }
+            # metadatas.append(
+            #     {
+            #         "document_id": document_id,
+            #         "filename": filename,
+            #         "page_start": page_number,
+            #         "page_end": page_number,
+            #         "chunk": local_index,
+            #         "url": "",
+            #         "source_type": source_type,
+            #     }
+            # )
+            if course_id:
+                metadata["course_id"] = course_id
+            metadatas.append(metadata)
             ids.append(chunk_id)
     return texts, metadatas, ids
 
@@ -183,6 +196,7 @@ def _build_web_chunk_payload(
     text: str,
     chunk_size: int,
     chunk_overlap: int,
+    course_id: Optional[str] = None
 ) -> Tuple[List[str], List[dict], List[str]]:
     chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     texts: List[str] = []
@@ -192,23 +206,35 @@ def _build_web_chunk_payload(
     for index, chunk in enumerate(chunks):
         chunk_id = f"{document_id}_web_{index}"
         texts.append(chunk)
-        metadatas.append(
-            {
-                "document_id": document_id,
-                "filename": title,
-                "page_start": index + 1,
-                "page_end": index + 1,
-                "chunk": index,
-                "url": url,
-                "source_type": "web",
-            }
-        )
+        # metadatas.append(
+        #     {
+        #         "document_id": document_id,
+        #         "filename": title,
+        #         "page_start": index + 1,
+        #         "page_end": index + 1,
+        #         "chunk": index,
+        #         "url": url,
+        #         "source_type": "web",
+        #     }
+        # )
+        metadata = {
+            "document_id": document_id,
+            "filename": title,
+            "page_start": index + 1,
+            "page_end": index + 1,
+            "chunk": index,
+            "url": url,
+            "source_type": "web",
+        }
+        if course_id:
+            metadata["course_id"] = course_id
+        metadatas.append(metadata)
         ids.append(chunk_id)
 
     return texts, metadatas, ids
 
 
-def ingest_document(upload_bytes: bytes, filename: str, content_type: Optional[str] = None) -> UploadResponse:
+def ingest_document(upload_bytes: bytes, filename: str, content_type: Optional[str] = None, course_id: Optional[str] = None) -> UploadResponse:
     settings: Settings = get_settings()
     document_store = DocumentStore(settings.chroma_path)
     collection = get_collection()
@@ -237,6 +263,7 @@ def ingest_document(upload_bytes: bytes, filename: str, content_type: Optional[s
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
         source_type=source_type,
+        course_id=course_id
     )
 
     if not texts:
@@ -258,13 +285,14 @@ def ingest_document(upload_bytes: bytes, filename: str, content_type: Optional[s
         page_count=len(pages),
         source_type=source_type,
         url=None,
+        course_id=course_id
     )
     document_store.upsert(summary)
 
     return UploadResponse(document=summary, chunks_indexed=len(texts))
 
 
-def ingest_web_page(url: str) -> UploadResponse:
+def ingest_web_page(url: str,course_id: Optional[str] = None) -> UploadResponse:
     settings: Settings = get_settings()
     document_store = DocumentStore(settings.chroma_path)
     collection = get_collection()
@@ -287,6 +315,7 @@ def ingest_web_page(url: str) -> UploadResponse:
         text=text,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
+        course_id=course_id 
     )
 
     if not texts:
@@ -308,6 +337,7 @@ def ingest_web_page(url: str) -> UploadResponse:
         page_count=len(texts),
         source_type="web",
         url=url,
+        course_id=course_id
     )
     document_store.upsert(summary)
 

@@ -155,11 +155,16 @@ async function handleUpload(event) {
   const status = $("#upload-status");
   if (!status) {
     return;
-  }
+  }  
   status.style.color = "";
   status.textContent = "Uploading...";
 
   const formData = new FormData(form);
+  const courseSelect = document.getElementById('pdf-course');
+  const courseId = courseSelect ? courseSelect.value : null;
+  if (courseId) {
+    formData.append('course_id', courseId);
+  }
   try {
     const response = await fetch("/api/documents", {
       method: "POST",
@@ -188,6 +193,97 @@ async function handleUpload(event) {
   }
 }
 
+function renderCourseData(courses) {
+  const list = document.getElementById("course-list");
+  if (!list) {
+    return;
+  }
+  list.innerHTML = ""; // Clear existing content
+
+  if (courses.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No courses created yet.";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const course of courses) {
+    const item = document.createElement("div"); // Use document, not course
+    item.className = "course-item";
+    
+    const header = document.createElement("div");
+    header.className = "course-header";
+    
+    const name = document.createElement("span");
+    name.className = "course-name";
+    name.textContent = course.title;
+    
+    const code = document.createElement("span");
+    code.className = "course-code";
+    code.textContent = course.code || "No code";
+    
+    header.append(name, code);
+
+    item.append(header);
+    list.appendChild(item);
+  }
+}
+
+async function fetchCourses() {
+  try {
+    const response = await fetch("/api/courses");
+    if (!response.ok) {
+      throw new Error("Failed to load courses");
+    }
+    const courses = await response.json();
+    
+    // Render the course list in the admin panel
+    renderCourseData(courses);
+    
+    // Populate all course dropdowns in the forms
+    populateCourseDropdowns(courses);
+    
+  } catch (err) {
+    console.error("Error fetching courses:", err);
+    const list = document.getElementById("course-list");
+    if (list) {
+      list.innerHTML = `<div class="error-state">Error loading courses: ${err.message}</div>`;
+    }
+  }
+}
+
+// Separate function to populate dropdowns (can be called with courses data)
+function populateCourseDropdowns(courses) {
+  const dropdowns = document.querySelectorAll('.course-select');
+  
+  dropdowns.forEach(dropdown => {
+    // Clear existing options except the first one
+    while (dropdown.children.length > 1) {
+      dropdown.removeChild(dropdown.lastChild);
+    }
+    
+    // Add course options
+    courses.forEach(course => {
+      const option = document.createElement('option');
+      option.value = course.id;
+      option.textContent = `${course.title}${course.code ? ` (${course.code})` : ''}`;
+      dropdown.appendChild(option);
+    });
+  });
+}
+
+// Add event listener for refresh button
+document.addEventListener('DOMContentLoaded', function() {
+  const refreshBtn = document.getElementById('refresh-courses');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', fetchCourses);
+  }
+  
+  // Load courses initially
+  fetchCourses();
+});
+
 async function handleVideoUpload(event) {
   event.preventDefault();
   
@@ -207,6 +303,8 @@ async function handleVideoUpload(event) {
     const description = document.getElementById("video-description").value;
     const fileInput = document.getElementById("video-file-input");
     const file = fileInput.files[0];
+    const courseSelect = document.getElementById('video-course');
+    const courseId = courseSelect ? courseSelect.value : null;
     
     // Validate required fields
     if (!title) {
@@ -245,14 +343,10 @@ async function handleVideoUpload(event) {
       formData.append('description', description);
     }
     
-    console.log("Uploading video data:", {
-      title,
-      type,
-      url: url || 'No URL provided',
-      hasFile: !!file,
-      description: description || 'No description'
-    });
-    
+    if (courseId) {
+      formData.append('course_id', courseId);
+    }
+
     const response = await fetch("/api/videos", {
       method: "POST",
       body: formData
@@ -275,6 +369,63 @@ async function handleVideoUpload(event) {
     
   } catch (err) {
     console.error("Video upload error:", err);
+    status.textContent = err.message;
+    status.style.color = "#dc2626";
+  }
+}
+
+async function handleCourseUpload(event) {
+  event.preventDefault();
+  
+  const status = document.getElementById("course-create-status"); // ← FIXED: Use vanilla JS
+  
+  if (!status) {
+    return;
+  }
+  
+  status.style.color = "";
+  status.textContent = "Uploading Course...";
+
+
+  try {
+    const title = document.getElementById("course-title").value;
+    const code = document.getElementById("course-code").value;
+    const description = document.getElementById("course-description").value;
+    const course_status = document.getElementById("course-active");
+
+  const courseData = {
+      title: title,
+      code: code || null,
+      description: description || null,
+      is_active: course_status ? course_status.checked : true
+    };
+        
+    
+    const response = await fetch("/api/courses", {
+      method: "POST",
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(courseData)
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || `Upload failed (${response.status})`);
+    }
+    
+    const payload = await response.json();
+    console.log("Course upload successful:", payload);
+    
+    // Use video response format
+    status.textContent = `${payload.message || 'Course uploaded successfully!'}`;
+    status.style.color = "green";
+    
+    // Reset the form
+    event.target.reset();
+    
+  } catch (err) {
+    console.error("Course upload error:", err);
+    const status = document.getElementById("course-create-status"); // ← Also fix in catch
     status.textContent = err.message;
     status.style.color = "#dc2626";
   }
@@ -839,12 +990,12 @@ function cleanTranscript(transcript) {
 window.addEventListener("DOMContentLoaded", () => {
   const uploadForm = $("#upload-form");
   const videoUploadForm = $("#video-upload-form");
+  const courseUploadForm = $("#course-create-form");
   const chatForm = $("#chat-form");
   const referenceList = $("#reference-list");
   const scrapeForm = $("#scrape-form");
   const referenceModal = $("#reference-modal");
   const modalClose = $("#reference-modal-close");  
-  console.log("videoUploadForm found:", videoUploadForm);
 
   if (uploadForm) {
     uploadForm.addEventListener("submit", handleUpload);
@@ -852,6 +1003,9 @@ window.addEventListener("DOMContentLoaded", () => {
   if (videoUploadForm) {
       console.log("Video form submit event FIRED"); // Add this
     videoUploadForm.addEventListener("submit", handleVideoUpload);
+  }
+   if (courseUploadForm) {
+    courseUploadForm.addEventListener("submit", handleCourseUpload);
   }
 
   if (scrapeForm) {

@@ -41,6 +41,51 @@
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
       }
+      /* Course form specific styles */
+      .course-form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+      
+      .form-group-full {
+        grid-column: 1 / -1;
+      }
+      
+      .course-input, .course-textarea {
+        width: 100%;
+        padding: 12px 16px;
+        font-size: 16px;
+        border: 2px solid #e1e5e9;
+        border-radius: 8px;
+        background: white;
+        transition: all 0.3s ease;
+        box-sizing: border-box;
+      }
+      
+      .course-textarea {
+        min-height: 100px;
+        resize: vertical;
+        font-family: inherit;
+      }
+      
+      .course-input:focus, .course-textarea:focus {
+        outline: none;
+        border-color: #007bff;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+      }
+      
+      .checkbox-group {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      
+      .checkbox-group input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+      }
     </style>
   </head>
   <body>
@@ -66,6 +111,7 @@
             <option value="pdf">Upload PDF/Document</option>
             <option value="video">Upload Video</option>
             <option value="webscrape">Scrape Web Content</option>
+            <option value="course">Create Course</option>
           </select>
         </div>
 
@@ -74,6 +120,11 @@
           <h2>Add Sources</h2>
           <p class="panel-description">Upload PDF reports, OCR-ready images, or scrape web pages to include them in your knowledge base.</p>
           <form id="upload-form" class="upload-form">
+             <label for="pdf-course">Assign to Course</label>
+              <select id="pdf-course" name="course_id" class="course-select">
+                <option value="">-- Select a Course --</option>
+                <!-- Options will be populated by JavaScript -->
+              </select>
             <input id="file-input" name="file" type="file" accept="application/pdf,image/*" required />
             <button type="submit">Upload File</button>
           </form>
@@ -83,6 +134,11 @@
         <!-- Web Scrape Form -->
         <div id="webscrape-section" class="panel form-section">
           <form id="scrape-form" class="scrape-form">
+            <label for="web-course">Assign to Course</label>
+            <select id="web-course" name="course_id" class="course-select">
+              <option value="">-- Select a Course --</option>
+              <!-- Options will be populated by JavaScript -->
+            </select>
             <input id="url-input" name="url" type="url" placeholder="https://example.com/article" required />
             <button type="submit">Scrape URL</button>
           </form>
@@ -94,6 +150,11 @@
           <h2>Upload Video(s)</h2>
           <p class="panel-description">Upload training videos from YouTube, direct links, or local files to include them in your knowledge base.</p>
           <form id="video-upload-form" class="upload-form" enctype="multipart/form-data">
+            <label for="video-course">Assign to Course</label>
+            <select id="video-course" name="course_id" class="course-select">
+              <option value="">-- Select a Course --</option>
+              <!-- Options will be populated by JavaScript -->
+            </select>
             <div class="form-group">
                 <input id="video-title" class="video-input" name="title" type="text" placeholder="Video Title" required />
             </div>
@@ -118,6 +179,49 @@
           </form>
           <div id="upload-video-status" class="status" role="status"></div>
         </div>
+        
+        <!-- Course Creation Form -->
+        <div id="course-section" class="panel form-section">
+          <h2>Create New Course</h2>
+          <p class="panel-description">Create a new course to organize your learning materials. You can assign PDFs and videos to courses later.</p>
+          <form id="course-create-form" class="upload-form" enctype="multipart/form-data">
+            <div class="course-form-grid">
+              <div class="form-group">
+                <label for="course-title">Course Title *</label>
+                <input id="course-title" class="course-input" name="title" type="text" placeholder="e.g., Infection Prevention Basics" required />
+              </div>
+              
+              <div class="form-group">
+                <label for="course-code">Course Code</label>
+                <input id="course-code" class="course-input" name="code" type="text" placeholder="e.g., IPC101" />
+              </div>
+              
+              <div class="form-group form-group-full">
+                <label for="course-description">Description</label>
+                <textarea id="course-description" class="course-textarea" name="description" placeholder="Brief description of the course content..."></textarea>
+              </div>
+              <div class="form-group">
+                <div class="checkbox-group">
+                  <input id="course-active" type="checkbox" name="is_active" checked />
+                  <label for="course-active">Active Course</label>
+                </div>
+              </div>
+            </div>
+            
+            <button type="submit" id="course-submit-btn">Create Course</button>
+          </form>
+          <div id="course-create-status" class="status" role="status"></div>
+          
+        </div>
+
+        <!-- Course List -->
+          <div class="panel" style="margin-top: 2rem;">
+            <div class="panel-header">
+              <h3>Existing Courses</h3>
+              <button id="refresh-courses" class="btn-secondary">Refresh List</button>
+            </div>
+            <div id="course-list" class="document-list"></div>
+          </div>
 
         <!-- Document List (Always Visible) -->
         <div class="panel">
@@ -130,7 +234,7 @@
       </section>
     </main>
 
-    <script src="/static/js/app.js?v=202510234" defer></script>
+    <script src="/static/js/app.js?v=202510243" defer></script>
     <script>
       // Dropdown functionality
       document.addEventListener('DOMContentLoaded', function() {
@@ -138,6 +242,7 @@
         const pdfSection = document.getElementById('pdf-section');
         const videoSection = document.getElementById('video-section');
         const webscrapeSection = document.getElementById('webscrape-section');
+        const courseSection = document.getElementById('course-section');
         
         // Show/hide forms based on dropdown selection
         sourceType.addEventListener('change', function() {
@@ -145,6 +250,7 @@
           pdfSection.classList.remove('active');
           videoSection.classList.remove('active');
           webscrapeSection.classList.remove('active');
+          courseSection.classList.remove('active');
           
           // Show selected form
           switch(this.value) {
@@ -157,6 +263,9 @@
             case 'webscrape':
               webscrapeSection.classList.add('active');
               break;
+            case 'course':
+              courseSection.classList.add('active');
+              break;
           }
         });
         
@@ -164,6 +273,7 @@
         pdfSection.classList.remove('active');
         videoSection.classList.remove('active');
         webscrapeSection.classList.remove('active');
+        courseSection.classList.remove('active');
       });
     </script>
   </body>
