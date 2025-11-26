@@ -492,3 +492,85 @@ async def serve_video(filename: str):
     except Exception as e:
         print(f"❌ Error serving video {filename}: {e}")
         raise HTTPException(status_code=500, detail="Error serving video")
+    
+@app.get("/api/courses", response_model=List[Course])
+def list_courses():
+    """Get all courses"""
+    try:
+        courses = course_store.list()
+        return courses
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching courses: {str(e)}")
+
+@app.post("/api/courses", response_model=Course)
+def create_course(course: CourseCreate):
+    """Create a new course"""
+    try:
+        # Generate course ID
+        course_id = str(uuid.uuid4())
+        
+        # Create course object
+        new_course = Course(
+            id=course_id,
+            title=course.title,
+            code=course.code,
+            description=course.description,
+            is_active=course.is_active,
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat()
+        )
+        
+        # Save to course store
+        created_course = course_store.create(new_course)
+        return created_course
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating course: {str(e)}")
+
+@app.get("/api/courses/{course_id}", response_model=Course)
+def get_course(course_id: str):
+    """Get a specific course by ID"""
+    try:
+        course = course_store.get(course_id)
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found")
+        return course
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching course: {str(e)}")
+
+@app.put("/api/courses/{course_id}", response_model=Course)
+def update_course(course_id: str, course_update: CourseUpdate):
+    """Update a course"""
+    try:
+        # Get existing course
+        existing_course = course_store.get(course_id)
+        if not existing_course:
+            raise HTTPException(status_code=404, detail="Course not found")
+        
+        # Update fields
+        updated_course = Course(
+            id=course_id,
+            title=course_update.title if course_update.title is not None else existing_course.title,
+            code=course_update.code if course_update.code is not None else existing_course.code,
+            description=course_update.description if course_update.description is not None else existing_course.description,
+            is_active=course_update.is_active if course_update.is_active is not None else existing_course.is_active,
+            created_at=existing_course.created_at,
+            updated_at=datetime.now().isoformat()
+        )
+        
+        # Save updated course
+        return course_store.update(updated_course)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating course: {str(e)}")
+
+@app.delete("/api/courses/{course_id}")
+def delete_course(course_id: str):
+    """Delete a course"""
+    try:
+        success = course_store.delete(course_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Course not found")
+        return {"message": "Course deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting course: {str(e)}")
