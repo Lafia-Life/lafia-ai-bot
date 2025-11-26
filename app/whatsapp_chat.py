@@ -132,7 +132,7 @@ def get_available_courses():
         return {}
     
     courses = {}
-    base_url = "https://f19d4f372e4e.ngrok-free.app"
+    base_url = "https://8e40f48677d9.ngrok-free.app"
     
     # Build courses with documents
     for doc in all_docs:
@@ -335,7 +335,7 @@ def create_pdf_download_response(pdfs, course_name, base_url):
         <Body>💡 Tap any PDF to view it. Use download icon to save.\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit</Body>
     </Message>'''
     messages_xml.append(nav_message)
-    
+    print("available_pdfs",available_pdfs)
     # If there's only one PDF, send it directly after the header
     if len(available_pdfs) == 1:
         pdf = available_pdfs[0]
@@ -457,7 +457,7 @@ async def serve_video(filename: str):
         print(f"❌ Error serving video {filename}: {e}")
         raise HTTPException(status_code=500, detail="Error serving video")
 
-def create_smart_video_response(video_urls, course_name, base_url: str = "https://f19d4f372e4e.ngrok-free.app"):
+def create_smart_video_response(video_urls, course_name, base_url: str = " https://8e40f48677d9.ngrok-free.app"):
     """Create response that sends VIDEO files directly to WhatsApp - WITH TITLES BELOW VIDEOS"""
     if not video_urls:
         response_text = "❌ No videos available for this course."
@@ -701,10 +701,10 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     # ENROLLED COURSE ACTIONS
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"enrolled_{course_id}":
-            base_url = "https://f19d4f372e4e.ngrok-free.app"
+            base_url = "https://8e40f48677d9.ngrok-free.app"
             if user_msg == "1":
+                print("course_data",course_data)
                 pdfs = course_data["pdfs"]
-                print("pdfs",pdfs)
                 course_name = course_data["name"]
                 raw_xml = create_pdf_download_response(pdfs, course_name, base_url)
                 return Response(content=raw_xml, media_type="application/xml")
@@ -766,7 +766,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     # BROWSING COURSE ACTIONS
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"browsing_{course_id}":
-            base_url = "https://f19d4f372e4e.ngrok-free.app"
+            base_url = "https://8e40f48677d9.ngrok-free.app"
             
             if user_msg == "1":
                 # View PDF Materials

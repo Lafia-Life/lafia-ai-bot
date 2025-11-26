@@ -192,40 +192,59 @@ async function handleUpload(event) {
     status.style.color = "#dc2626";
   }
 }
-
 function renderCourseData(courses) {
   const list = document.getElementById("course-list");
   if (!list) {
     return;
   }
-  list.innerHTML = ""; // Clear existing content
+  list.innerHTML = "";
 
   if (courses.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
+    const empty = document.createElement("li");
     empty.textContent = "No courses created yet.";
     list.appendChild(empty);
     return;
   }
 
   for (const course of courses) {
-    const item = document.createElement("div"); // Use document, not course
-    item.className = "course-item";
-    
-    const header = document.createElement("div");
-    header.className = "course-header";
-    
+    const item = document.createElement("li");
     const name = document.createElement("span");
-    name.className = "course-name";
     name.textContent = course.title;
     
-    const code = document.createElement("span");
-    code.className = "course-code";
-    code.textContent = course.code || "No code";
+    const meta = document.createElement("span");
+    meta.className = "course-meta";
     
-    header.append(name, code);
-
-    item.append(header);
+    // Build course metadata similar to document metadata
+    const metaParts = [];
+    
+    // Course code if available
+    if (course.code) {
+      metaParts.push(course.code);
+    }
+    
+    // Status
+    metaParts.push(course.is_active ? "Active" : "Inactive");
+    
+    // Document and video counts (if available in your data)
+    if (course.document_count !== undefined) {
+      const docLabel = course.document_count === 1 ? "1 document" : `${course.document_count} documents`;
+      metaParts.push(docLabel);
+    }
+    
+    if (course.video_count !== undefined) {
+      const videoLabel = course.video_count === 1 ? "1 video" : `${course.video_count} videos`;
+      metaParts.push(videoLabel);
+    }
+    
+    // Created date
+    if (course.created_at) {
+      const createdDate = new Date(course.created_at).toLocaleDateString();
+      metaParts.push(`Created ${createdDate}`);
+    }
+    
+    meta.textContent = metaParts.join(" · ");
+    
+    item.append(name, meta);
     list.appendChild(item);
   }
 }
