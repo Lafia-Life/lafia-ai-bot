@@ -1,7 +1,7 @@
 from pathlib import Path
 import fastapi
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile,Form
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile,Form,Query
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -16,21 +16,28 @@ from app.services.video_store import VideoStore
 from app.services.ingestion import ingest_document, ingest_web_page
 from app.services.retrieval import stream_answer, answer_question
 from app.services.sms_service import send_sms_response, parse_incoming_sms
-from app.whatsapp_chat import app as whatsapp_app
+# from app.whatsapp_chat import app as whatsapp_app
 from starlette.requests import Request
 from app.services.video_store  import VideoStore
 from app.services.course_store import CourseStore
+from app.whatsapp import router as whatsapp_router
+
+
 
 
 course_store = CourseStore(Path("storage/data"))
 app = FastAPI(title="PDF Chat Assistant")
-app.mount("/webhook", whatsapp_app)
+# app.mount("/webhook", whatsapp_app)
 settings = get_settings()
 document_store = DocumentStore(settings.chroma_path)
 video_store = VideoStore(settings.chroma_path)
-
-
-settings = get_settings()
+app.include_router(
+    whatsapp_router,
+    prefix="/webhook",
+    tags=["WhatsApp Webhook"],
+    include_in_schema=False  # Optional: hide from docs
+)
+# app.mount("/webhook", whatsapp_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -55,6 +62,13 @@ def _resolve_document_path(document_id: str, store: DocumentStore) -> tuple[Docu
 def chat_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("chat.html", {"request": request})
 
+
+@app.get("/whatsapp")
+def whatsapp_redirect():
+    return RedirectResponse(
+        url="https://api.whatsapp.com/send/?phone=%2B14155238886&text=Hello%21+I+would+like+to+start+the+e-learning+session.&type=phone_number&app_absent=0",
+        status_code=302
+    )
 
 @app.get("/upload", response_class=HTMLResponse)
 def upload_page(request: Request) -> HTMLResponse:
@@ -344,9 +358,7 @@ async def test_webhook_flow(request: Request):
         }
     
 def debug_storage_layout():
-    """Debug the actual storage layout"""
-    print("📁 STORAGE LAYOUT DEBUG:")
-    
+    """Debug the actual storage layout"""    
     locations = [
         Path("storage"),
         Path("storage/chroma"),
@@ -358,7 +370,6 @@ def debug_storage_layout():
     
     for location in locations:
         if location.exists():
-            print(f"✅ {location}: EXISTS")
             try:
                 files = list(location.glob("*"))
                 print(f"   Files: {[f.name for f in files[:5]]}")  # Show first 5 files
@@ -368,7 +379,6 @@ def debug_storage_layout():
             print(f"❌ {location}: DOES NOT EXIST")
     
     # Check where documents are actually stored
-    print("\n🔍 DOCUMENT STORAGE LOCATION:")
     settings = get_settings()
     
 @app.post("/api/videos", response_model=VideoUploadResponse)
@@ -444,54 +454,6 @@ async def upload_video(
         print(f"Video storage error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/serve-video/{filename}")
-@app.head("/serve-video/{filename}")
-async def serve_video(filename: str):
-    """Serve video files directly - FIXED VERSION"""
-    try:
-        # Check multiple possible locations for the video file
-        possible_paths = [
-            f"storage/uploads/{filename}",
-            f"storage/chroma/videos/{filename}",
-            f"storage/chroma/documents/{filename}",
-            f"storage/chroma/uploads/{filename}",
-            f"storage/chroma/{filename}",
-            f"uploads/{filename}",
-        ]
-        
-        video_path = None
-        for path in possible_paths:
-            if os.path.exists(path) and os.path.isfile(path):
-                video_path = path
-                print(f"✅ Found video at: {video_path}")
-                break
-        
-        if not video_path:
-            print(f"❌ Video not found: {filename}")
-            raise HTTPException(status_code=404, detail="Video not found")
-        
-        # Get file size and check if it's a valid video
-        file_size = os.path.getsize(video_path)
-        if file_size < 100:  # Too small to be a real video
-            print(f"❌ Video file too small: {file_size} bytes")
-            raise HTTPException(status_code=404, detail="Invalid video file")
-        
-        print(f"✅ Serving video: {filename} ({file_size} bytes)")
-        
-        return FileResponse(
-            path=video_path,
-            filename=filename,
-            media_type='video/mp4',  # Explicitly set media type
-            headers={
-                'Content-Type': 'video/mp4',
-                'Accept-Ranges': 'bytes',
-                'Cache-Control': 'public, max-age=3600'
-            }
-        )
-        
-    except Exception as e:
-        print(f"❌ Error serving video {filename}: {e}")
-        raise HTTPException(status_code=500, detail="Error serving video")
     
 @app.get("/api/courses", response_model=List[Course])
 def list_courses():
@@ -574,3 +536,4 @@ def delete_course(course_id: str):
         return {"message": "Course deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting course: {str(e)}")
+
