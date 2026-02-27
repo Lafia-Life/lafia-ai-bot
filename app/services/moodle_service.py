@@ -6,6 +6,8 @@ import threading
 import time
 import urllib.parse
 import json
+import re
+from html import unescape
 from urllib.parse import urlparse, parse_qs, urlencode
 import urllib3
 
@@ -18,6 +20,140 @@ CACHE_DURATION = 300
 courses_cache_timestamp = 0
 MOODLE_BASE_URL = os.getenv("MOODLE_BASE_URL")
 MOODLE_TOKEN = os.getenv("MOODLE_TOKEN")
+URL_PATTERN = re.compile(r'https?://[^\s<>"\']+')
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv", ".3gp")
+VIDEO_HOST_HINTS = ("youtube.com", "youtu.be", "vimeo.com", "dailymotion.com", "wistia.")
+POWERPOINT_MIMETYPES = (
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+)
+
+
+def _strip_url(url: str) -> str:
+    cleaned = unescape(str(url or "")).strip()
+    if not cleaned:
+        return ""
+    return cleaned.rstrip('\'"<>.,;)')
+
+
+def _tokenize_url(url: str, token: str | None) -> str:
+    parsed = urlparse(url)
+    query_params = parse_qs(parsed.query)
+    if token:
+        query_params["token"] = [token]
+    query_params["forcedownload"] = ["1"]
+    query_params.pop("wstoken", None)
+    return parsed._replace(query=urlencode(query_params, doseq=True)).geturl()
+
+
+def _normalize_resource_url(url: str, token: str | None) -> str:
+    cleaned = _strip_url(url)
+    if not cleaned:
+        return ""
+    if "pluginfile.php" in cleaned:
+        return _tokenize_url(cleaned, token)
+    return cleaned
+
+
+def _is_pdf_resource(filename: str, mimetype: str, url: str) -> bool:
+    low_filename = (filename or "").lower()
+    low_mimetype = (mimetype or "").lower()
+    low_url = (url or "").lower()
+    return (
+        low_filename.endswith(".pdf")
+        or ".pdf?" in low_url
+        or low_url.endswith(".pdf")
+        or "pdf" in low_mimetype
+    )
+
+
+def _is_video_resource(filename: str, mimetype: str, url: str, title: str = "") -> bool:
+    low_filename = (filename or "").lower()
+    low_mimetype = (mimetype or "").lower()
+    low_url = (url or "").lower()
+    low_title = (title or "").lower()
+    if "video" in low_mimetype:
+        return True
+    if any(low_filename.endswith(ext) for ext in VIDEO_EXTENSIONS):
+        return True
+    if any(ext + "?" in low_url or low_url.endswith(ext) for ext in VIDEO_EXTENSIONS):
+        return True
+    if any(host in low_url for host in VIDEO_HOST_HINTS):
+        return True
+    if "video" in low_title or "video" in low_filename:
+        return True
+    return False
+
+
+def _is_powerpoint_resource(filename: str, mimetype: str, url: str) -> bool:
+    low_filename = (filename or "").lower()
+    low_mimetype = (mimetype or "").lower()
+    low_url = (url or "").lower()
+    return (
+        low_mimetype in POWERPOINT_MIMETYPES
+        or low_filename.endswith(".ppt")
+        or low_filename.endswith(".pptx")
+        or ".ppt?" in low_url
+        or ".pptx?" in low_url
+    )
+
+
+def _extract_urls_from_blob(blob: str) -> list[str]:
+    if not blob or not isinstance(blob, str):
+        return []
+    return URL_PATTERN.findall(unescape(blob))
+
+
+def _collect_module_resources(module: dict, token: str | None, course_id: str):
+    module_name = module.get("name", "Untitled")
+    module_cmid = module.get("id")
+    videos = []
+    pdfs = []
+    powerpoints = []
+    seen_urls = set()
+
+    def add_resource(url: str, filename: str = "", mimetype: str = "", size: int = 0):
+        normalized_url = _normalize_resource_url(url, token)
+        if not normalized_url or normalized_url in seen_urls:
+            return
+        seen_urls.add(normalized_url)
+
+        entry = {
+            "title": module_name,
+            "filename": filename or module_name,
+            "url": normalized_url,
+            "original_url": _strip_url(url),
+            "mimetype": mimetype or "",
+            "type": mimetype or "",
+            "cmid": module_cmid,
+            "course_id": course_id,
+            "size": size or 0,
+        }
+
+        if _is_pdf_resource(entry["filename"], entry["mimetype"], entry["url"]):
+            pdfs.append(entry)
+        elif _is_video_resource(entry["filename"], entry["mimetype"], entry["url"], module_name):
+            videos.append(entry)
+        elif _is_powerpoint_resource(entry["filename"], entry["mimetype"], entry["url"]):
+            powerpoints.append(entry)
+
+    for content in module.get("contents", []):
+        add_resource(
+            content.get("fileurl") or content.get("url") or content.get("contenturl"),
+            content.get("filename") or content.get("name") or module_name,
+            content.get("mimetype") or content.get("type") or "",
+            content.get("filesize", 0),
+        )
+
+    # URL activity modules may expose their target URL here.
+    add_resource(module.get("url"), module_name, "", 0)
+
+    # Files/links embedded in Moodle editor content (Label, Page, Book, etc.).
+    for field in ("description", "intro", "summary", "content"):
+        for embedded_url in _extract_urls_from_blob(module.get(field)):
+            add_resource(embedded_url, module_name, "", 0)
+
+    return {"videos": videos, "pdfs": pdfs, "powerpoints": powerpoints}
 
 def get_moodle_courses():
     """Fetch courses from Moodle API"""
@@ -84,38 +220,10 @@ def get_moodle_course_contents(course_id: str):
         }
 
         for module in section.get("modules", []):
-            module_name = module.get("name", "Untitled")
-            module_type = module.get("modname")
-            module_cmid = module.get("id")
-
-            for content in module.get("contents", []):
-                file_url = content.get("fileurl")
-                mimetype = content.get("mimetype")
-                filename = content.get("filename")
-
-                if not file_url or not mimetype:
-                    continue
-
-                working_url = file_url
-
-                file_obj = {
-                    "title": module_name,
-                    "filename": filename,
-                    "url": working_url,
-                    "mimetype": mimetype,
-                    "cmid": module_cmid,
-                    "course_id": course_id,
-                }
-
-                if mimetype.startswith("video/"):
-                    section_obj["videos"].append(file_obj)
-                elif mimetype == "application/pdf":
-                    section_obj["pdfs"].append(file_obj)
-                elif mimetype in (
-                    "application/vnd.ms-powerpoint",
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                ):
-                    section_obj["powerpoints"].append(file_obj)
+            resources = _collect_module_resources(module, MOODLE_TOKEN, course_id)
+            section_obj["videos"].extend(resources["videos"])
+            section_obj["pdfs"].extend(resources["pdfs"])
+            section_obj["powerpoints"].extend(resources["powerpoints"])
 
         sections.append(section_obj)
 
@@ -409,45 +517,23 @@ def extract_moodle_resources(contents, token: str):
     """Extract PDFs and videos from course contents - TESTED & WORKING"""
     pdfs = []
     videos = []
+    seen_video_urls = set()
+    seen_pdf_urls = set()
     
     if not contents:
         return {'pdfs': pdfs, 'videos': videos}
     
     for section in contents:
         for module in section.get('modules', []):
-            for content in module.get('contents', []):
-                if content.get('type') == 'file':
-                    fileurl = content.get('fileurl', '')
-                    filename = content.get('filename', 'file')
-                    mimetype = content.get('mimetype', '')
-                    
-                    if not fileurl:
-                        continue
-                    
-                    # Add token to URL for direct access
-                    parsed = urlparse(fileurl)
-                    query_params = parse_qs(parsed.query)
-                    query_params['token'] = [token]
-                    query_params['forcedownload'] = ['1']
-                    
-                    new_query = urlencode(query_params, doseq=True)
-                    accessible_url = parsed._replace(query=new_query).geturl()
-                    
-                    file_info = {
-                        'title': filename,
-                        'url': accessible_url,
-                        'original_url': fileurl,
-                        'size': content.get('filesize', 0),
-                        'type': mimetype
-                    }
-                    
-                    # Categorize
-                    if '.pdf' in filename.lower() or 'pdf' in mimetype:
-                        pdfs.append(file_info)
-                    elif any(ext in filename.lower() for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']) or 'video' in mimetype:
-                        videos.append(file_info)
-                    elif 'video' in filename.lower():
-                        videos.append(file_info)
+            resources = _collect_module_resources(module, token, str(section.get("id", "")))
+            for video in resources["videos"]:
+                if video["url"] not in seen_video_urls:
+                    seen_video_urls.add(video["url"])
+                    videos.append(video)
+            for pdf in resources["pdfs"]:
+                if pdf["url"] not in seen_pdf_urls:
+                    seen_pdf_urls.add(pdf["url"])
+                    pdfs.append(pdf)
     
     return {'pdfs': pdfs, 'videos': videos}
 
