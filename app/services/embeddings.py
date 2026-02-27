@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Iterable, List, Sequence
+from typing import List, Sequence
 
-from sentence_transformers import SentenceTransformer
 
 from app.config import Settings, get_openai_client, get_settings
 
 
 @lru_cache()
-def _load_local_model(model_name: str) -> SentenceTransformer:
+def _load_local_model(model_name: str):
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "Local embeddings require 'sentence-transformers'. "
+            "Install it or set EMBEDDING_BACKEND=openai."
+        ) from exc
     # Normalize embeddings to improve cosine similarity behaviour inside Chroma.
     return SentenceTransformer(model_name, trust_remote_code=True, device="cpu")
 
