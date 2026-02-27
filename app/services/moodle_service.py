@@ -128,7 +128,8 @@ def preload_courses_background():
     while True:
         print("⏳ Preloading Moodle courses in background...")
         try:
-            courses = get_available_courses()  # fetch full courses with contents
+            # Force refresh so Moodle add/delete changes are picked up regularly.
+            courses = get_available_courses(force_refresh=True)
             with cache_lock:
                 courses_cache = courses
                 courses_cache_timestamp = time.time()
@@ -137,13 +138,21 @@ def preload_courses_background():
             print(f"❌ Error preloading courses: {e}")
         time.sleep(CACHE_DURATION)
 
-def get_available_courses():
-    """Return Moodle courses with full content, using cache if available."""
+def clear_courses_cache():
+    """Clear in-memory Moodle course cache."""
+    global courses_cache, courses_cache_timestamp
+    with cache_lock:
+        courses_cache = {}
+        courses_cache_timestamp = 0
+
+
+def get_available_courses(force_refresh: bool = False):
+    """Return Moodle courses with full content, using cache unless force_refresh is True."""
     global courses_cache, courses_cache_timestamp
 
     current_time = time.time()
     with cache_lock:
-        if courses_cache and (current_time - courses_cache_timestamp < CACHE_DURATION):
+        if (not force_refresh) and courses_cache and (current_time - courses_cache_timestamp < CACHE_DURATION):
             return courses_cache.copy()
 
     moodle_courses = get_moodle_courses()

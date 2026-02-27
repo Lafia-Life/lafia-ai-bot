@@ -23,6 +23,7 @@ import asyncio
 import threading
 from app.services.moodle_service import (
     get_available_courses, 
+    clear_courses_cache,
     preload_courses_background,
     normalize_moodle_file_url,
     authenticate_moodle_user,
@@ -773,6 +774,23 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
         login_response = await handle_moodle_login_flow(phone, raw_msg)
         if login_response:
             return login_response 
+
+    # ====== MANUAL CACHE REFRESH ======
+    if user_msg in ["refresh", "reload", "sync"]:
+        try:
+            clear_courses_cache()
+            fresh_courses = get_available_courses(force_refresh=True)
+            response_text = (
+                f"🔄 Course list refreshed.\n\n"
+                f"Found {len(fresh_courses)} course(s) from Moodle.\n\n"
+                "Reply 1 to browse courses."
+            )
+        except Exception:
+            response_text = "⚠️ Refresh failed. Please try again in a few seconds."
+
+        escaped_text = escape_xml(response_text)
+        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+        return Response(content=raw_xml, media_type="application/xml")
     
     # ====== FIRST CONTACT ======
     if phone not in user_state:
@@ -796,7 +814,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     if user_state[phone] == "main_menu":
         if user_msg in ["1", "browse"]:
             user_state[phone] = "browse_courses"
-            courses = get_available_courses()
+            courses = get_available_courses(force_refresh=True)
             course_ids = list(courses.keys())
 
             if not courses:
@@ -899,7 +917,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             user_state[phone] = "question_mode"
             
             # Show available course materials for context
-            courses = get_available_courses()
+            courses = get_available_courses(force_refresh=True)
             if not courses:
                 response_text = (
                     "🤖 *Document Q&A*\n\n"
