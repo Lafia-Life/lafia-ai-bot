@@ -310,9 +310,12 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
                 traceback.print_exc()
     
     if not downloaded_videos:
-        response_text = "Could not download any videos. Please try again later."
-        escaped_text = escape_xml(response_text)
-        return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+        # Fall back to plain direct links when media download/attach is blocked.
+        return create_video_links_response(
+            video_urls,
+            course_name,
+            note="Could not download videos to WhatsApp right now. Sharing direct links instead."
+        )
     
     # Now send the videos to WhatsApp
     videos_header = f'''<Message>
@@ -338,6 +341,61 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
         """
         messages_xml.append(message_xml)
     
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+{"".join(messages_xml)}
+</Response>'''
+
+
+def create_video_links_response(videos, course_name, note: str = ""):
+    """Return direct video URLs as text messages (works even when media delivery fails)."""
+    if not videos:
+        response_text = "No videos available for this course."
+        escaped_text = escape_xml(response_text)
+        return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+
+    messages_xml = []
+
+    header_text = f"🔗 {course_name} - Video Links"
+    if note:
+        header_text = f"{header_text}\n\n⚠️ {note}"
+    messages_xml.append(
+        f'''<Message>
+        <Body>{escape_xml(header_text)}</Body>
+    </Message>'''
+    )
+
+    sent = 0
+    for i, video in enumerate(videos, start=1):
+        video_url = (video or {}).get("url", "")
+        if not video_url:
+            continue
+        video_title = (video or {}).get("title", "Video")
+        body = f"🎥 {i}. {video_title}\n{video_url}"
+        messages_xml.append(
+            f'''<Message>
+            <Body>{escape_xml(body)}</Body>
+        </Message>'''
+        )
+        sent += 1
+        if sent >= 5:
+            break
+
+    total_with_urls = sum(1 for item in videos if (item or {}).get("url"))
+    if total_with_urls > sent:
+        remaining = total_with_urls - sent
+        messages_xml.append(
+            f'''<Message>
+            <Body>{escape_xml(f"... and {remaining} more video link(s).")}</Body>
+        </Message>'''
+        )
+
+    messages_xml.append(
+        '''<Message>
+        <Body>💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu</Body>
+    </Message>'''
+    )
+
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <Response>
 {"".join(messages_xml)}
@@ -382,10 +440,18 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
             query_params['forcedownload'] = ['1']
             download_url = parsed._replace(query=urlencode(query_params, doseq=True)).geturl()
 
-            head_response = requests.head(download_url, headers=headers, verify=False, timeout=10)
-            if head_response.status_code != 200:
-                print(f"Cannot access video (HEAD {head_response.status_code})")
-                continue
+            try:
+                head_response = requests.head(
+                    download_url,
+                    headers=headers,
+                    verify=False,
+                    timeout=10,
+                    allow_redirects=True
+                )
+                if head_response.status_code >= 400:
+                    print(f"HEAD check failed ({head_response.status_code}), trying GET anyway...")
+            except requests.RequestException as head_error:
+                print(f"HEAD check error ({head_error}), trying GET anyway...")
 
             print("\nDownloading...")
             get_response = requests.get(download_url, headers=headers, stream=True, timeout=60, verify=False)
@@ -1231,32 +1297,8 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 if not videos:
                     response_text = "No videos available."
                 else:
-                    messages_xml = []
-                    
-                    header = f'''<Message>
-                        <Body>🔗 {escape_xml(course_name)} - Video Links</Body>
-                    </Message>'''
-                    messages_xml.append(header)
-                    
-                    for i, video in enumerate(videos[:3]):
-                        video_message = f'''<Message>
-                            <Body>🎥 {i+1}. {escape_xml(video['title'])}</Body>
-                            <Media>{escape_xml(video['url'])}</Media>
-                        </Message>'''
-                        messages_xml.append(video_message)
-                    
-                    nav_message = f'''<Message>
-                        <Body>💡 Try opening links in browser if they don't play in WhatsApp.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu</Body>
-                    </Message>'''
-                    messages_xml.append(nav_message)
-                    
-                    return Response(
-                        content=f'''<?xml version="1.0" encoding="UTF-8"?>
-                        <Response>
-                        {"".join(messages_xml)}
-                        </Response>''',
-                        media_type="application/xml"
-                    )
+                    raw_xml = create_video_links_response(videos, course_name)
+                    return Response(content=raw_xml, media_type="application/xml")
                     
             elif user_msg == "2":
                 # Download videos using URLs generated from the logged-in user's token.
