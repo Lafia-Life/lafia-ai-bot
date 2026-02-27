@@ -132,7 +132,7 @@ def get_available_courses():
         return {}
     
     courses = {}
-    base_url = "https://8e40f48677d9.ngrok-free.app"
+    base_url = "https://elearning.cadh.africa"
     
     # Build courses with documents
     for doc in all_docs:
@@ -457,7 +457,7 @@ async def serve_video(filename: str):
         print(f"❌ Error serving video {filename}: {e}")
         raise HTTPException(status_code=500, detail="Error serving video")
 
-def create_smart_video_response(video_urls, course_name, base_url: str = " https://8e40f48677d9.ngrok-free.app"):
+def create_smart_video_response(video_urls, course_name, base_url: str = "https://elearning.cadh.africa"):
     """Create response that sends VIDEO files directly to WhatsApp - WITH TITLES BELOW VIDEOS"""
     if not video_urls:
         response_text = "❌ No videos available for this course."
@@ -701,7 +701,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     # ENROLLED COURSE ACTIONS
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"enrolled_{course_id}":
-            base_url = "https://8e40f48677d9.ngrok-free.app"
+            base_url = "https://elearning.cadh.africa"
             if user_msg == "1":
                 print("course_data",course_data)
                 pdfs = course_data["pdfs"]
@@ -766,7 +766,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     # BROWSING COURSE ACTIONS
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"browsing_{course_id}":
-            base_url = "https://8e40f48677d9.ngrok-free.app"
+            base_url = "https://elearning.cadh.africa"
             
             if user_msg == "1":
                 # View PDF Materials

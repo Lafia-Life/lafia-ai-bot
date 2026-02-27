@@ -67,6 +67,14 @@ def escape_xml(text: str) -> str:
                .replace("'", '&apos;'))
 
 
+def normalize_phone_key(from_value: str) -> str:
+    """Normalize sender IDs so session state is stable across provider formats."""
+    value = (from_value or "").strip().lower()
+    if value.startswith("whatsapp:"):
+        value = value.split(":", 1)[1]
+    return value
+
+
 def get_document_file_path(document_id: str):
     """Get the actual file path from document_id - THOROUGH VERSION"""
     # Check cache first
@@ -254,7 +262,7 @@ def serve_video(filename: str):
         }
     )
 
-def create_smart_video_response(video_urls, course_name, course_id, token, base_url: str = "https://2b76-41-75-184-245.ngrok-free.app"):
+def create_smart_video_response(video_urls, course_name, course_id, token, base_url: str = "https://elearning.cadh.africa"):
     """Download videos and serve them DIRECTLY in WhatsApp messages"""
 
     if not video_urls:
@@ -280,7 +288,7 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
         if video_url:
             try:
                 # Download the video to our server
-                local_path = download_and_store_video(video_url, course_id, video_title,token)
+                local_path = download_and_store_video(video_url, course_id, video_title, token)
                 
                 if local_path:
                     # Get the filename for our server URL
@@ -343,72 +351,70 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
     Download Moodle video - USING THE WORKING APPROACH FROM test_sample.py
     """
     try:
-        
-        # Use the exact same logic as test_sample.py
         parsed = urlparse(moodle_url)
-        query_params = parse_qs(parsed.query)
-        
-        # Add token - SIMPLE, don't remove existing
+
+        # Try the logged-in user's token first, then fallback token if available.
+        fallback_token = os.getenv("MOODLE_TOKEN")
+        token_candidates = []
         if token:
-            query_params['token'] = [token]
-        
-        # Ensure forcedownload
-        query_params['forcedownload'] = ['1']
-        
-        # Rebuild URL
-        new_query = urlencode(query_params, doseq=True)
-        download_url = parsed._replace(query=new_query).geturl()
-                
-        # Use same headers as test_sample.py
+            token_candidates.append(token)
+        if fallback_token and fallback_token not in token_candidates:
+            token_candidates.append(fallback_token)
+        if not token_candidates:
+            token_candidates.append(None)
+
         headers = {
             'User-Agent': 'Mozilla/5.0',
             'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
             'Referer': 'https://elearning.cadh.africa/',
         }
-        
-        response = requests.head(download_url, headers=headers, verify=False, timeout=10)
-        
-        if response.status_code != 200:
-            print(f"Cannot access video")
-            return None
-        
-        # Now download
-        print("\nDownloading...")
-        get_response = requests.get(download_url, headers=headers, stream=True, timeout=60, verify=False)
-        
-        if get_response.status_code == 200:
-            # Check if it's actually a video
+
+        videos_dir = Path("videos")
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        safe_title = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in video_title)
+        filename = f"course_{course_id}_{safe_title}.mp4"
+        local_path = videos_dir / filename
+
+        for token_candidate in token_candidates:
+            query_params = parse_qs(parsed.query)
+            if token_candidate:
+                query_params['token'] = [token_candidate]
+            query_params['forcedownload'] = ['1']
+            download_url = parsed._replace(query=urlencode(query_params, doseq=True)).geturl()
+
+            head_response = requests.head(download_url, headers=headers, verify=False, timeout=10)
+            if head_response.status_code != 200:
+                print(f"Cannot access video (HEAD {head_response.status_code})")
+                continue
+
+            print("\nDownloading...")
+            get_response = requests.get(download_url, headers=headers, stream=True, timeout=60, verify=False)
+            if get_response.status_code != 200:
+                print(f"Video download failed (GET {get_response.status_code})")
+                continue
+
             content_type = get_response.headers.get("content-type", "").lower()
-            if "video" not in content_type and "octet-stream" not in content_type:                
-                # Check first bytes
-                sample = get_response.content[:100]
-                print(f"📄 First 100 bytes: {sample}")
-                
-                return None
-            
-            # Save file
-            videos_dir = Path("videos")  # Changed from "storage/uploads/videos"
-            videos_dir.mkdir(parents=True, exist_ok=True)
-            
-            filename = f"course_{course_id}_{video_title.replace(' ', '_')}.mp4"
-            local_path = videos_dir / filename
-            
+            if "video" not in content_type and "octet-stream" not in content_type:
+                sample = next(get_response.iter_content(200), b"")
+                print(f"📄 Non-video response: {sample[:120]}")
+                continue
+
             downloaded = 0
             with open(local_path, "wb") as f:
                 for chunk in get_response.iter_content(8192):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        
+
             if downloaded < 1000:
                 print("File too small")
                 local_path.unlink(missing_ok=True)
-                return None
-            
+                continue
+
             return str(local_path)
-        
+
         return None
-        
+
     except Exception as e:
         print(f"Video download error: {e}")
         import traceback
@@ -460,7 +466,8 @@ async def handle_moodle_login_flow(phone, raw_msg):
 
     # ===== USERNAME STEP =====
     if state == "moodle_username":
-        user_moodle_data[phone]["username"] = raw_msg
+        user_moodle_data.setdefault(phone, {})
+        user_moodle_data[phone]["username"] = raw_msg.strip()
         user_state[phone] = "moodle_password"
 
         response_text = (
@@ -473,7 +480,16 @@ async def handle_moodle_login_flow(phone, raw_msg):
 
     # ===== PASSWORD STEP =====
     if state == "moodle_password":
-        username = user_moodle_data[phone]["username"]
+        username = user_moodle_data.get(phone, {}).get("username")
+        if not username:
+            user_state[phone] = "moodle_username"
+            response_text = (
+                "🔐 *Login Required*\n\n"
+                "Please enter your Moodle username:"
+            )
+            escaped_text = escape_xml(response_text)
+            raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+            return Response(content=raw_xml, media_type="application/xml")
         password = raw_msg  # RAW, NOT lowercased
 
         auth_result = authenticate_moodle_user(username, password)
@@ -683,8 +699,8 @@ def main_menu_text():
 async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     raw_msg = Body.strip()
     user_msg = raw_msg.lower()
-    phone = From
-    base_url = "https://2b76-41-75-184-245.ngrok-free.app" 
+    phone = normalize_phone_key(From)
+    base_url = "https://elearning.cadh.africa"
     
     # ====== CHECK FOR MOODLE LOGIN FLOW FIRST ======
     if user_state.get(phone, "") in ["moodle_username", "moodle_password"]:
@@ -1243,11 +1259,19 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                     )
                     
             elif user_msg == "2":
-                # Download videos
+                # Download videos using URLs generated from the logged-in user's token.
                 token = user_moodle_data[phone]['token']
-                video_urls = course_data["videos"]
+                contents = get_course_contents_moodle(token, int(course_id))
+                resources = extract_moodle_resources(contents, token)
+                video_urls = resources.get('videos', [])
                 course_name = course_data["name"]
-                raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, base_url)            
+                if not video_urls:
+                    response_text = "No videos available for this course."
+                    escaped_text = escape_xml(response_text)
+                    raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+                    return Response(content=raw_xml, media_type="application/xml")
+
+                raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, base_url)
                 return Response(content=raw_xml, media_type="application/xml")
                 
             elif user_msg == "9":
@@ -1268,7 +1292,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     # ====== BROWSING SPECIFIC COURSE HANDLER ======
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"browsing_{course_id}":
-            base_url = "https://2b76-41-75-184-245.ngrok-free.app"
+            base_url = "https://elearning.cadh.africa"
                 
             if user_msg == "1":
                 # Check if user is logged into Moodle
