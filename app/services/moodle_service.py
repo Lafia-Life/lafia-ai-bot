@@ -36,7 +36,22 @@ def _strip_url(url: str) -> str:
     return cleaned.rstrip('\'"<>.,;)')
 
 
+def _ensure_webservice_pluginfile(url: str) -> str:
+    parsed = urlparse(url)
+    path = parsed.path or ""
+    if "/webservice/pluginfile.php/" in path:
+        return url
+    if "/pluginfile.php/" in path:
+        path = path.replace("/pluginfile.php/", "/webservice/pluginfile.php/", 1)
+        return parsed._replace(path=path).geturl()
+    if path.endswith("/pluginfile.php"):
+        path = path.replace("/pluginfile.php", "/webservice/pluginfile.php")
+        return parsed._replace(path=path).geturl()
+    return url
+
+
 def _tokenize_url(url: str, token: str | None) -> str:
+    url = _ensure_webservice_pluginfile(url)
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query)
     if token:
@@ -50,6 +65,7 @@ def _normalize_resource_url(url: str, token: str | None) -> str:
     cleaned = _strip_url(url)
     if not cleaned:
         return ""
+    cleaned = _ensure_webservice_pluginfile(cleaned)
     if "pluginfile.php" in cleaned:
         return _tokenize_url(cleaned, token)
     return cleaned

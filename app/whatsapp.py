@@ -2,6 +2,7 @@ import token
 from urllib.parse import quote, urlparse, parse_qs, urlencode
 import hashlib
 import os
+import mimetypes
 import json
 import subprocess
 import tempfile
@@ -240,24 +241,23 @@ def serve_video(filename: str):
     """
     Serve a locally downloaded Moodle video to WhatsApp
     """
-    file_path = Path("videos") / filename
-    # file_path = os.path.join("videos", filename)
-
+    safe_filename = os.path.basename(filename)
+    file_path = Path("storage/uploads/videos") / safe_filename
     if not os.path.exists(file_path):
+        print(f"❌ Video not found for serving: {file_path}")
         raise HTTPException(status_code=404, detail="Video not found")
 
-    def iterfile():
-        with open(file_path, "rb") as f:
-            while chunk := f.read(1024 * 1024):
-                yield chunk
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    media_type = mime_type or "application/octet-stream"
+    file_size = os.path.getsize(file_path)
+    print(f"✅ Serving video: {safe_filename} ({file_size} bytes, {media_type})")
 
-    return StreamingResponse(
-        iterfile(),
-        media_type="video/mp4",
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        filename=safe_filename,
         headers={
-            "Content-Type": "video/mp4",
             "Content-Disposition": "inline",
-            "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=86400",
             "Access-Control-Allow-Origin": "*",
         }
@@ -336,8 +336,8 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
         
         message_xml = f"""
         <Message>
-            <Media>{escape_xml(video_url)}</Media>
             <Body>🎥 {escape_xml(video_title)}</Body>
+            <Media>{escape_xml(video_url)}</Media>
         </Message>
         """
         messages_xml.append(message_xml)
@@ -410,7 +410,13 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
     Download Moodle video - USING THE WORKING APPROACH FROM test_sample.py
     """
     try:
+        max_video_bytes = int(os.getenv("WHATSAPP_MAX_VIDEO_BYTES", str(15 * 1024 * 1024)))
         parsed = urlparse(moodle_url)
+        normalized_path = parsed.path or ""
+        if "/webservice/pluginfile.php/" not in normalized_path and "/pluginfile.php/" in normalized_path:
+            normalized_path = normalized_path.replace("/pluginfile.php/", "/webservice/pluginfile.php/", 1)
+            moodle_url = parsed._replace(path=normalized_path).geturl()
+            parsed = urlparse(moodle_url)
 
         # Try the logged-in user's token first, then fallback token if available.
         fallback_token = os.getenv("MOODLE_TOKEN")
@@ -428,10 +434,13 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
             'Referer': 'https://elearning.cadh.africa/',
         }
 
-        videos_dir = Path("videos")
+        videos_dir = Path("storage/uploads/videos")
         videos_dir.mkdir(parents=True, exist_ok=True)
         safe_title = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in video_title)
-        filename = f"course_{course_id}_{safe_title}.mp4"
+        source_ext = Path(parsed.path or "").suffix.lower()
+        if source_ext not in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv", ".3gp"}:
+            source_ext = ".mp4"
+        filename = f"course_{course_id}_{safe_title}{source_ext}"
         local_path = videos_dir / filename
 
         for token_candidate in token_candidates:
@@ -451,6 +460,10 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
                 )
                 if head_response.status_code >= 400:
                     print(f"HEAD check failed ({head_response.status_code}), trying GET anyway...")
+                content_length = int(head_response.headers.get("content-length") or 0)
+                if content_length and content_length > max_video_bytes:
+                    print(f"Video too large for WhatsApp ({content_length} bytes), skipping")
+                    continue
             except requests.RequestException as head_error:
                 print(f"HEAD check error ({head_error}), trying GET anyway...")
 
@@ -472,9 +485,15 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
+                        if downloaded > max_video_bytes:
+                            print(f"Downloaded file exceeded WhatsApp limit ({downloaded} bytes), skipping")
+                            break
 
             if downloaded < 1000:
                 print("File too small")
+                local_path.unlink(missing_ok=True)
+                continue
+            if downloaded > max_video_bytes:
                 local_path.unlink(missing_ok=True)
                 continue
 
