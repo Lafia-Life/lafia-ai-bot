@@ -155,6 +155,20 @@ def _collect_module_resources(module: dict, token: str | None, course_id: str):
 
     return {"videos": videos, "pdfs": pdfs, "powerpoints": powerpoints}
 
+
+def _collect_section_embedded_resources(section: dict, token: str | None, course_id: str):
+    """Collect links/files placed in section editor fields (summary/description)."""
+    pseudo_module = {
+        "id": section.get("id"),
+        "name": section.get("name") or "Section Content",
+        "summary": section.get("summary") or "",
+        "description": section.get("description") or "",
+        "intro": section.get("intro") or "",
+        "content": section.get("content") or "",
+        "contents": [],
+    }
+    return _collect_module_resources(pseudo_module, token, course_id)
+
 def get_moodle_courses():
     """Fetch courses from Moodle API"""
     url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
@@ -224,6 +238,11 @@ def get_moodle_course_contents(course_id: str):
             section_obj["videos"].extend(resources["videos"])
             section_obj["pdfs"].extend(resources["pdfs"])
             section_obj["powerpoints"].extend(resources["powerpoints"])
+
+        section_resources = _collect_section_embedded_resources(section, MOODLE_TOKEN, course_id)
+        section_obj["videos"].extend(section_resources["videos"])
+        section_obj["pdfs"].extend(section_resources["pdfs"])
+        section_obj["powerpoints"].extend(section_resources["powerpoints"])
 
         sections.append(section_obj)
 
@@ -524,8 +543,19 @@ def extract_moodle_resources(contents, token: str):
         return {'pdfs': pdfs, 'videos': videos}
     
     for section in contents:
+        section_course_id = str(section.get("courseid", "") or section.get("id", ""))
+        section_resources = _collect_section_embedded_resources(section, token, section_course_id)
+        for video in section_resources["videos"]:
+            if video["url"] not in seen_video_urls:
+                seen_video_urls.add(video["url"])
+                videos.append(video)
+        for pdf in section_resources["pdfs"]:
+            if pdf["url"] not in seen_pdf_urls:
+                seen_pdf_urls.add(pdf["url"])
+                pdfs.append(pdf)
+
         for module in section.get('modules', []):
-            resources = _collect_module_resources(module, token, str(section.get("id", "")))
+            resources = _collect_module_resources(module, token, section_course_id)
             for video in resources["videos"]:
                 if video["url"] not in seen_video_urls:
                     seen_video_urls.add(video["url"])
