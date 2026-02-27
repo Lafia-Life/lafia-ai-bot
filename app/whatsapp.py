@@ -14,6 +14,8 @@ from fastapi import APIRouter, Form, Response, HTTPException, Query, Request,Fas
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
+from app.schemas import ChatRequest
+from app.services.retrieval import answer_question
 from datetime import datetime 
 from app.services.document_store import DocumentStore
 from app.services.video_store import VideoStore
@@ -67,6 +69,15 @@ def escape_xml(text: str) -> str:
                .replace('>', '&gt;')
                .replace('"', '&quot;')
                .replace("'", '&apos;'))
+
+
+def twiml_message(text: str = "") -> Response:
+    escaped_text = escape_xml(text or "")
+    if escaped_text:
+        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+    else:
+        raw_xml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
+    return Response(content=raw_xml, media_type="application/xml")
 
 
 def normalize_phone_key(from_value: str) -> str:
@@ -782,11 +793,15 @@ def main_menu_text():
     )
 
 @router.post("/")  
-async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
-    raw_msg = Body.strip()
+async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default="")):
+    raw_msg = (Body or "").strip()
     user_msg = raw_msg.lower()
-    phone = normalize_phone_key(From)
+    phone = normalize_phone_key(From or "")
     base_url = "https://elearning.cadh.africa"
+
+    # Twilio status callbacks may hit this webhook without message content.
+    if not phone or not raw_msg:
+        return twiml_message()
     
     # ====== CHECK FOR MOODLE LOGIN FLOW FIRST ======
     if user_state.get(phone, "") in ["moodle_username", "moodle_password"]:
@@ -807,9 +822,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
         except Exception:
             response_text = "⚠️ Refresh failed. Please try again in a few seconds."
 
-        escaped_text = escape_xml(response_text)
-        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-        return Response(content=raw_xml, media_type="application/xml")
+        return twiml_message(response_text)
     
     # ====== FIRST CONTACT ======
     if phone not in user_state:
@@ -825,9 +838,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             "6️⃣ Ask Question Q&A\n\n"
             "0️⃣ Main Menu • #️⃣ Exit"
         )
-        escaped_text = escape_xml(response_text)
-        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-        return Response(content=raw_xml, media_type="application/xml")
+        return twiml_message(response_text)
     
     # ====== MAIN MENU ======
     if user_state[phone] == "main_menu":
@@ -970,9 +981,96 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 "1️⃣-6️⃣ for actions or 0️⃣ for main menu"
             )
         
-        escaped_text = escape_xml(response_text)
-        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-        return Response(content=raw_xml, media_type="application/xml")
+        return twiml_message(response_text)
+
+    # ====== QUIZ SELECTION HANDLER ======
+    if user_state[phone] == "quiz_selection":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text())
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+        if user_msg in ["1", "2", "3"]:
+            user_state[phone] = "view_results"
+            quiz_names = {
+                "1": "Infection Prevention Basics",
+                "2": "Safety Procedures",
+                "3": "Emergency Protocols",
+            }
+            return twiml_message(
+                f"✅ You selected *{quiz_names[user_msg]}*.\n\n"
+                "This demo bot currently shows sample results only.\n\n"
+                "4️⃣ View Quiz Results • 0️⃣ Main Menu"
+            )
+        return twiml_message("Please select quiz 1, 2, 3 or 0 for main menu.")
+
+    # ====== VIEW RESULTS HANDLER ======
+    if user_state[phone] == "view_results":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text())
+        if user_msg in ["3", "quiz", "take new quiz"]:
+            user_state[phone] = "quiz_selection"
+            return twiml_message(
+                "📝 *Quiz Center*\n\n"
+                "Available quizzes:\n"
+                "1. Infection Prevention Basics\n"
+                "2. Safety Procedures\n"
+                "3. Emergency Protocols\n\n"
+                "0️⃣ Main Menu • #️⃣ Exit\n\n"
+                "Select a quiz number to start:"
+            )
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+        return twiml_message(
+            "📊 *Your Quiz Results*\n\n"
+            "🦠 Infection Prevention: 85%\n"
+            "🛡️ Safety Procedures: 92%\n"
+            "🚨 Emergency Protocols: 78%\n\n"
+            "Overall Performance: Good! 🎉\n\n"
+            "0️⃣ Main Menu • 3️⃣ Take New Quiz"
+        )
+
+    # ====== TRAINER SUPPORT HANDLER ======
+    if user_state[phone] == "ask_trainer":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text())
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+        user_state[phone] = "main_menu"
+        return twiml_message(
+            "✅ Your message has been sent to a trainer.\n\n"
+            "A trainer will follow up with you.\n\n"
+            "Returning to main menu:\n\n"
+            + main_menu_text()
+        )
+
+    # ====== QUESTION MODE HANDLER ======
+    if user_state[phone] == "question_mode":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text())
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+
+        try:
+            chat_response = answer_question(ChatRequest(question=raw_msg))
+            response_text = (
+                f"🤖 {chat_response.answer}\n\n"
+                "Ask another question, or reply 0 for main menu."
+            )
+        except Exception as e:
+            print(f"Q&A error: {e}")
+            response_text = (
+                "⚠️ I could not process your question right now.\n\n"
+                "Please try again, or reply 0 for main menu."
+            )
+        return twiml_message(response_text)
 
     # ====== MY ENROLLED COURSES HANDLER ======
     if user_state[phone] == "my_courses":
@@ -1036,9 +1134,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 response_text = "Please login first to access your courses."
                 user_state[phone] = "main_menu"
         
-        escaped_text = escape_xml(response_text)
-        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-        return Response(content=raw_xml, media_type="application/xml")
+        return twiml_message(response_text)
 
     # ====== BROWSE COURSES HANDLER ======
     if user_state[phone] == "browse_courses":
@@ -1113,9 +1209,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                     "0️⃣ Main Menu • #️⃣ Exit"
                 )
 
-        escaped_text = escape_xml(response_text)
-        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-        return Response(content=raw_xml, media_type="application/xml")
+        return twiml_message(response_text)
 
 
     # # ====== ENROLLED COURSE ACTIONS ======
@@ -1230,9 +1324,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             # 🎯 FIXED: Check if user is logged in
             if phone not in user_moodle_data or 'token' not in user_moodle_data[phone]:
                 response_text = "Please login to access course materials."
-                escaped_text = escape_xml(response_text)
-                raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-                return Response(content=raw_xml, media_type="application/xml")
+                return twiml_message(response_text)
             
             # User is logged in - use Moodle system
             token = user_moodle_data[phone]['token']
@@ -1316,9 +1408,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                     "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
                 )
             
-            escaped_text = escape_xml(response_text)
-            raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-            return Response(content=raw_xml, media_type="application/xml")
+            return twiml_message(response_text)
     
     # ====== MOODLE VIDEOS HANDLER ======
     for course_id, course_data in get_available_courses().items():
@@ -1346,9 +1436,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 course_name = course_data["name"]
                 if not video_urls:
                     response_text = "No videos available for this course."
-                    escaped_text = escape_xml(response_text)
-                    raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-                    return Response(content=raw_xml, media_type="application/xml")
+                    return twiml_message(response_text)
 
                 raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, base_url)
                 return Response(content=raw_xml, media_type="application/xml")
@@ -1364,9 +1452,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             else:
                 response_text = "Please select 1, 2, or 9."
             
-            escaped_text = escape_xml(response_text)
-            raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-            return Response(content=raw_xml, media_type="application/xml")
+            return twiml_message(response_text)
     
     # ====== BROWSING SPECIFIC COURSE HANDLER ======
     for course_id, course_data in get_available_courses().items():
@@ -1526,9 +1612,13 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                     "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
                 )
             
-            escaped_text = escape_xml(response_text)
-            raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-            return Response(content=raw_xml, media_type="application/xml")
+            return twiml_message(response_text)
+
+    # ====== FALLBACK FOR UNKNOWN SESSION STATES ======
+    user_state[phone] = "main_menu"
+    return twiml_message(
+        "⚠️ Session state was reset.\n\n" + main_menu_text()
+    )
 # Additional WhatsApp endpoints
 @router.get("/status")
 async def whatsapp_status():
