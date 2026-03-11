@@ -27,7 +27,7 @@ import threading
 from app.services.moodle_service import (
     get_available_courses, 
     clear_courses_cache,
-    preload_courses_background,
+    start_preload_worker,
     normalize_moodle_file_url,
     authenticate_moodle_user,
     get_user_enrolled_courses_moodle,
@@ -1644,7 +1644,7 @@ async def whatsapp_info():
 async def startup_event():
     """Pre-load courses on startup for instant response"""
     get_available_courses()
-    threading.Thread(target=preload_courses_background, daemon=True).start()
+    start_preload_worker()
 
 # Keep backward compatibility - export app if needed for direct usage
 app = FastAPI(title="WhatsApp Chat")

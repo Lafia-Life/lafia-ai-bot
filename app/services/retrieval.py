@@ -44,6 +44,29 @@ _NO_CONTEXT_MESSAGE = "I could not find the answer in the uploaded documents."
 _RETRIEVAL_CANDIDATES = 24
 
 
+def _retrieval_error_message(exc: Exception) -> str:
+    detail = str(exc).strip()
+    if "sentence-transformers" in detail:
+        return (
+            "Embeddings backend is not ready on this server. "
+            "Install 'sentence-transformers' or set EMBEDDING_BACKEND=openai "
+            "with a valid embedding model."
+        )
+    if detail:
+        return f"Unable to search indexed documents: {detail}"
+    return "Unable to search indexed documents due to a server configuration error."
+
+
+def _fetch_retrieval_results(collection, payload: ChatRequest) -> List[dict]:
+    embedding = embed_query(payload.question)
+    raw_results = query_collection(
+        collection=collection,
+        embedding=embedding,
+        n_results=_RETRIEVAL_CANDIDATES,
+    )
+    return _filter_results(raw_results, payload, limit=4)
+
+
 def _coerce_text(value) -> str:
     if value is None:
         return ""
@@ -198,14 +221,13 @@ def answer_question(payload: ChatRequest) -> ChatResponse:
     client = get_openai_client(settings)
     collection = get_collection()
 
-    embedding = embed_query(payload.question)
-
-    raw_results = query_collection(
-        collection=collection,
-        embedding=embedding,
-        n_results=_RETRIEVAL_CANDIDATES,
-    )
-    raw_results = _filter_results(raw_results, payload, limit=4)
+    try:
+        raw_results = _fetch_retrieval_results(collection, payload)
+    except Exception as exc:  # noqa: BLE001
+        return ChatResponse(
+            answer=_retrieval_error_message(exc),
+            citations=[],
+        )
 
     if not raw_results:
         return ChatResponse(
@@ -267,13 +289,11 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
     client = get_openai_client(settings)
     collection = get_collection()
 
-    embedding = embed_query(payload.question)
-    raw_results = query_collection(
-        collection=collection,
-        embedding=embedding,
-        n_results=_RETRIEVAL_CANDIDATES,
-    )
-    raw_results = _filter_results(raw_results, payload, limit=4)
+    try:
+        raw_results = _fetch_retrieval_results(collection, payload)
+    except Exception as exc:  # noqa: BLE001
+        yield _encode_event({"type": "error", "message": _retrieval_error_message(exc)})
+        return
 
     if not raw_results:
         _answer_cache.set(

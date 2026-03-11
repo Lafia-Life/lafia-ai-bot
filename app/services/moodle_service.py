@@ -20,6 +20,10 @@ CACHE_DURATION = 300
 courses_cache_timestamp = 0
 MOODLE_BASE_URL = os.getenv("MOODLE_BASE_URL")
 MOODLE_TOKEN = os.getenv("MOODLE_TOKEN")
+_preload_thread = None
+_preload_thread_lock = threading.Lock()
+_invalid_token_warning_printed = False
+_missing_config_warning_printed = False
 URL_PATTERN = re.compile(r'https?://[^\s<>"\']+')
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv", ".3gp")
 VIDEO_HOST_HINTS = ("youtube.com", "youtu.be", "vimeo.com", "dailymotion.com", "wistia.")
@@ -187,6 +191,15 @@ def _collect_section_embedded_resources(section: dict, token: str | None, course
 
 def get_moodle_courses():
     """Fetch courses from Moodle API"""
+    global _invalid_token_warning_printed, _missing_config_warning_printed
+
+    if not MOODLE_BASE_URL or not MOODLE_TOKEN:
+        if not _missing_config_warning_printed:
+            print("⚠️ Moodle preload skipped: set MOODLE_BASE_URL and MOODLE_TOKEN.")
+            _missing_config_warning_printed = True
+        return {}
+
+    _missing_config_warning_printed = False
     url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
     parameters = {
         "wstoken": MOODLE_TOKEN,
@@ -199,8 +212,16 @@ def get_moodle_courses():
         courses = response.json()
         
         if isinstance(courses, dict) and courses.get('exception'):
-            print(f"Moodle API error: {courses.get('message', 'Unknown error')}")
+            message = courses.get('message', 'Unknown error')
+            if "invalid token" in str(message).lower():
+                if not _invalid_token_warning_printed:
+                    print("⚠️ Moodle API token is invalid. Update MOODLE_TOKEN and restart the app container.")
+                    _invalid_token_warning_printed = True
+            else:
+                print(f"Moodle API error: {message}")
             return {}
+
+        _invalid_token_warning_printed = False
         
         courses_dict = {}
         for course in courses:
@@ -280,6 +301,22 @@ def preload_courses_background():
         except Exception as e:
             print(f"❌ Error preloading courses: {e}")
         time.sleep(CACHE_DURATION)
+
+
+def start_preload_worker() -> bool:
+    """Start the Moodle preload worker once per process."""
+    global _preload_thread
+
+    with _preload_thread_lock:
+        if _preload_thread is not None and _preload_thread.is_alive():
+            return False
+        _preload_thread = threading.Thread(
+            target=preload_courses_background,
+            daemon=True,
+            name="moodle-preload-worker",
+        )
+        _preload_thread.start()
+        return True
 
 def clear_courses_cache():
     """Clear in-memory Moodle course cache."""
