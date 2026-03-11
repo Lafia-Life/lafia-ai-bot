@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from enum import Enum
 
 
@@ -143,14 +143,13 @@ class ScrapeRequest(BaseModel):
 class SMSWebhookRequest(BaseModel):
     """Incoming SMS webhook from Africa's Talking"""
     to: str  # Your shortcode/number
-    from_: str  # Sender's phone number
+    from_: str = Field(alias="from")  # Sender's phone number
     text: str  # SMS message content
     date: str  # Timestamp
     id: str  # Message ID
     linkId: Optional[str] = None
 
-    class Config:
-        fields = {"from_": "from"}
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SMSResponse(BaseModel):

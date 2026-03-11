@@ -32,26 +32,29 @@
           <p class="panel-description">{{#str}}label:syncscope, mod_chatlearning{{/str}}: {{documentscopelabel}}</p>
         </div>
       </header>
+      <div class="tools-grid">
 
       {{#allowuploads}}
       <article class="tool-card">
-        <header class="panel-header">
+        <header class="tool-card-header">
           <h3>{{#str}}label:uploads, mod_chatlearning{{/str}}</h3>
+          <p class="tool-help">Upload local files and add them to this activity index.</p>
         </header>
         <form class="upload-form" data-upload-form enctype="multipart/form-data">
           <input type="file" name="file" data-upload-input {{#allowedmimetypes}}accept="{{allowedmimetypes}}"{{/allowedmimetypes}} />
-          <button type="submit">{{#str}}label:uploads, mod_chatlearning{{/str}}</button>
+          <button type="submit" class="tool-action">Upload and index</button>
           <p class="status" data-upload-status></p>
         </form>
       </article>
 
       <article class="tool-card">
-        <header class="panel-header">
+        <header class="tool-card-header">
           <h3>{{#str}}label:scrape, mod_chatlearning{{/str}}</h3>
+          <p class="tool-help">Paste a webpage URL to ingest its text into searchable knowledge.</p>
         </header>
         <form class="scrape-form" data-scrape-form>
           <input type="url" name="url" placeholder="https://example.com/article" data-scrape-input />
-          <button type="submit" class="secondary">{{#str}}label:scrape, mod_chatlearning{{/str}}</button>
+          <button type="submit" class="secondary tool-action">Fetch URL and index</button>
           <p class="status" data-scrape-status></p>
         </form>
       </article>
@@ -59,8 +62,9 @@
 
       {{#allowmoodlesync}}
       <article class="tool-card">
-        <header class="panel-header">
+        <header class="tool-card-header">
           <h3>{{#str}}label:syncmoodle, mod_chatlearning{{/str}}</h3>
+          <p class="tool-help">Import Moodle resources from allowed courses directly into chat indexing.</p>
         </header>
         <form class="sync-form" data-sync-form>
           <label class="source-option">
@@ -71,11 +75,12 @@
             <input type="checkbox" data-sync-scorm {{#sourcescorm}}checked{{/sourcescorm}} />
             <span>{{#str}}sourcescorm, mod_chatlearning{{/str}}</span>
           </label>
-          <button type="submit" class="secondary">{{#str}}label:syncmoodle, mod_chatlearning{{/str}}</button>
+          <button type="submit" class="secondary tool-action">{{#str}}label:syncmoodle, mod_chatlearning{{/str}}</button>
           <p class="status" data-sync-status></p>
         </form>
       </article>
       {{/allowmoodlesync}}
+      </div>
     </section>
     {{/canmanage}}
   </div>

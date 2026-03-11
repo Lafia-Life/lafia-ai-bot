@@ -4,11 +4,11 @@
 namespace mod_chatlearning\external;
 
 use context_module;
-use external_api;
-use external_function_parameters;
-use external_multiple_structure;
-use external_single_structure;
-use external_value;
+use core_external\external_api;
+use core_external\external_function_parameters;
+use core_external\external_multiple_structure;
+use core_external\external_single_structure;
+use core_external\external_value;
 use mod_chatlearning\local\api\client;
 use moodle_exception;
 use stdClass;
@@ -156,18 +156,21 @@ class api extends external_api {
     public static function sync_moodle_documents_parameters(): external_function_parameters {
         return new external_function_parameters([
             'cmid' => new external_value(PARAM_INT, 'Course module ID'),
-            'include_pdf' => new external_value(PARAM_BOOL, 'Include PDF resources', VALUE_DEFAULT, true),
-            'include_scorm' => new external_value(PARAM_BOOL, 'Include SCORM packages', VALUE_DEFAULT, true),
+            'include_pdf' => new external_value(PARAM_RAW, 'Include PDF resources', VALUE_DEFAULT, '1'),
+            'include_scorm' => new external_value(PARAM_RAW, 'Include SCORM packages', VALUE_DEFAULT, '1'),
         ]);
     }
 
-    public static function sync_moodle_documents(int $cmid, bool $include_pdf = true, bool $include_scorm = true): array {
+    public static function sync_moodle_documents(int $cmid, $include_pdf = true, $include_scorm = true): array {
         global $DB;
 
-        ['cmid' => $cmid, 'include_pdf' => $include_pdf, 'include_scorm' => $include_scorm] = self::validate_parameters(
+        $params = self::validate_parameters(
             self::sync_moodle_documents_parameters(),
             ['cmid' => $cmid, 'include_pdf' => $include_pdf, 'include_scorm' => $include_scorm]
         );
+        $cmid = (int)$params['cmid'];
+        $include_pdf = self::normalize_bool_param($params['include_pdf'], true);
+        $include_scorm = self::normalize_bool_param($params['include_scorm'], true);
 
         $cm = get_coursemodule_from_id('chatlearning', $cmid, 0, false, MUST_EXIST);
         $course = get_course($cm->course);
@@ -247,6 +250,23 @@ class api extends external_api {
             'documents_indexed' => $documentsindexed,
             'documents_skipped' => $documentsskipped,
         ];
+    }
+
+    private static function normalize_bool_param($value, bool $default = true): bool {
+        if ($value === null || $value === '') {
+            return $default;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return ((int)$value) !== 0;
+        }
+        $normalized = strtolower(trim((string)$value));
+        if ($normalized === '') {
+            return $default;
+        }
+        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }
 
     public static function sync_moodle_documents_returns(): external_single_structure {

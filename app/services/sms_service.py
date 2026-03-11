@@ -2,7 +2,7 @@ import logging
 import json
 from typing import Optional
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
 
@@ -17,14 +17,13 @@ class SMSMessage(BaseModel):
 class IncomingSMS(BaseModel):
     """Model for incoming SMS from Africa's Talking webhook"""
     to: str  # Your shortcode/number
-    from_: str  # Sender's phone number  
+    from_: str = Field(alias="from")  # Sender's phone number
     text: str
     date: str
     id: str
     linkId: Optional[str] = None
-    
-    class Config:
-        fields = {"from_": "from"}
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SMSService:

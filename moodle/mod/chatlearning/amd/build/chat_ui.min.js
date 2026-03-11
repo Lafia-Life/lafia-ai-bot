@@ -233,7 +233,7 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         Ajax.call([
             {
                 methodname: 'mod_chatlearning_get_documents',
-                args: {cmid: config.cmid, sesskey: config.sesskey},
+                args: {cmid: Number(config.cmid)},
             },
         ])[0]
             .then(function(docs) {
@@ -294,7 +294,7 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         Ajax.call([
             {
                 methodname: 'mod_chatlearning_scrape_url',
-                args: {cmid: config.cmid, url: url, sesskey: config.sesskey},
+                args: {cmid: Number(config.cmid), url: url},
             },
         ])[0]
             .then(function(payload) {
@@ -326,17 +326,20 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
             {
                 methodname: 'mod_chatlearning_sync_moodle_documents',
                 args: {
-                    cmid: config.cmid,
-                    include_pdf: includePdf,
-                    include_scorm: includeScorm,
-                    sesskey: config.sesskey,
+                    cmid: Number(config.cmid),
+                    include_pdf: includePdf ? 1 : 0,
+                    include_scorm: includeScorm ? 1 : 0,
                 },
             },
         ])[0]
             .then(function(payload) {
                 var indexed = payload && payload.documents_indexed ? payload.documents_indexed : 0;
-                var template = strings.synccomplete || 'Sync complete: {$a} documents indexed.';
-                setStatus(status, template.replace('{$a}', String(indexed)));
+                var discovered = payload && payload.files_discovered ? payload.files_discovered : 0;
+                var skipped = payload && payload.documents_skipped ? payload.documents_skipped : 0;
+                setStatus(
+                    status,
+                    'Sync complete: ' + indexed + ' indexed, ' + discovered + ' discovered, ' + skipped + ' skipped.'
+                );
                 fetchDocuments();
             })
             .catch(function(err) {
@@ -366,7 +369,7 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         Ajax.call([
             {
                 methodname: 'mod_chatlearning_submit_question',
-                args: {cmid: config.cmid, question: question, sesskey: config.sesskey},
+                args: {cmid: Number(config.cmid), question: question},
             },
         ])[0]
             .then(function(payload) {
