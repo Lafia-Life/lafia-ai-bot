@@ -11,6 +11,7 @@ $chatlearning = $DB->get_record('chatlearning', ['id' => $cm->instance], '*', MU
 
 require_login($course, true, $cm);
 $context = context_module::instance($cm->id);
+$canmanage = has_capability('mod/chatlearning:manage', $context);
 
 $PAGE->set_url('/mod/chatlearning/view.php', ['id' => $cm->id]);
 $PAGE->set_title(format_string($chatlearning->name));
@@ -27,6 +28,12 @@ $jsconfig = [
     'sesskey' => sesskey(),
     'contextPrompt' => $chatlearning->contextprompt ?? '',
     'allowUploads' => (bool)$chatlearning->allowuploads,
+    'allowMoodleSync' => (bool)($chatlearning->allowmoodlesync ?? 1),
+    'canManage' => $canmanage,
+    'sourcePdf' => (bool)($chatlearning->sourcepdf ?? 1),
+    'sourceScorm' => (bool)($chatlearning->sourcescorm ?? 1),
+    'documentScope' => $chatlearning->documentscope ?? 'enrolledcourses',
+    'includeGlobalDocs' => (bool)($chatlearning->allowglobaldocs ?? 0),
     'allowedMimeTypes' => $chatlearning->allowedmimetypes ?? '',
     'apiBase' => $apibase,
     'documentBase' => $apibase ? $apibase . '/documents/' : '',
@@ -40,9 +47,21 @@ if (!empty($chatlearning->intro)) {
     echo $OUTPUT->box(format_module_intro('chatlearning', $chatlearning, $cm->id), 'generalbox mod_introbox');
 }
 
+$documentscope = $chatlearning->documentscope ?? 'enrolledcourses';
+if (!in_array($documentscope, ['currentcourse', 'enrolledcourses', 'allcourses'], true)) {
+    $documentscope = 'enrolledcourses';
+}
+$documentscopelabel = get_string('documentscope:' . $documentscope, 'mod_chatlearning');
+
 $templatecontext = [
     'cmid' => $cm->id,
+    'canmanage' => $canmanage,
     'allowuploads' => (bool)$chatlearning->allowuploads,
+    'allowmoodlesync' => (bool)($chatlearning->allowmoodlesync ?? 1),
+    'sourcepdf' => (bool)($chatlearning->sourcepdf ?? 1),
+    'sourcescorm' => (bool)($chatlearning->sourcescorm ?? 1),
+    'documentscope' => $documentscope,
+    'documentscopelabel' => $documentscopelabel,
     'allowedmimetypes' => $chatlearning->allowedmimetypes ?? '',
 ];
 

@@ -26,7 +26,15 @@ class client {
     }
 
     public function get_documents(stdClass $context): array {
-        $params = $this->build_context_params($context);
+        $params = [
+            'include_global' => !empty($context->includeglobaldocs) ? 'true' : 'false',
+        ];
+        if (!empty($context->allowedcourseids) && is_array($context->allowedcourseids)) {
+            $params['course_id'] = array_values($context->allowedcourseids);
+        }
+        if (!empty($context->allowedsourcetypes) && is_array($context->allowedsourcetypes)) {
+            $params['source_type'] = array_values($context->allowedsourcetypes);
+        }
         $response = $this->request('get', '/api/documents', $params);
         return $response['documents'] ?? $response;
     }
@@ -39,9 +47,9 @@ class client {
         return $this->request_stream('/api/chat', $payload);
     }
 
-    public function upload_document(stdClass $context, array $fileinfo): array {
+    public function upload_document(stdClass $context, array $fileinfo, array $extrafields = []): array {
         $params = $this->build_context_params($context);
-        $payload = array_merge($params, ['file' => $this->prepare_file($fileinfo)]);
+        $payload = array_merge($params, $extrafields, ['file' => $this->prepare_file($fileinfo)]);
         return $this->request('upload', '/api/documents', [], $payload);
     }
 
@@ -55,7 +63,7 @@ class client {
         $url = $this->baseurl . $path;
 
         if (!empty($query)) {
-            $url .= (strpos($url, '?') === false ? '?' : '&') . http_build_query($query);
+            $url .= (strpos($url, '?') === false ? '?' : '&') . $this->build_query_string($query);
         }
 
         $headers = ['Accept: application/json'];
@@ -153,14 +161,23 @@ class client {
     }
 
     private function build_context_params(stdClass $context): array {
-        return [
+        $params = [
             'moodle_course_id' => $context->courseid,
             'moodle_cmid' => $context->cmid,
             'moodle_user_id' => $context->userid,
             'moodle_username' => $context->username,
             'moodle_fullname' => $context->fullname,
             'chatlearning_instance' => $context->instanceid,
+            'course_id' => $context->courseid,
+            'include_global_docs' => !empty($context->includeglobaldocs),
         ];
+        if (!empty($context->allowedcourseids) && is_array($context->allowedcourseids)) {
+            $params['allowed_course_ids'] = array_values($context->allowedcourseids);
+        }
+        if (!empty($context->allowedsourcetypes) && is_array($context->allowedsourcetypes)) {
+            $params['allowed_source_types'] = array_values($context->allowedsourcetypes);
+        }
+        return $params;
     }
 
     private function prepare_file(array $fileinfo) {
@@ -176,5 +193,22 @@ class client {
         }
 
         return '@' . $fileinfo['tmp_name'];
+    }
+
+    private function build_query_string(array $query): string {
+        $parts = [];
+        foreach ($query as $key => $value) {
+            if (is_array($value)) {
+                foreach ($value as $item) {
+                    $parts[] = rawurlencode((string)$key) . '=' . rawurlencode((string)$item);
+                }
+                continue;
+            }
+            if ($value === null) {
+                continue;
+            }
+            $parts[] = rawurlencode((string)$key) . '=' . rawurlencode((string)$value);
+        }
+        return implode('&', $parts);
     }
 }

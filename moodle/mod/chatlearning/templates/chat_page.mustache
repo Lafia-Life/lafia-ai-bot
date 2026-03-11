@@ -1,49 +1,83 @@
 <div class="mod-chatlearning" data-component="chatlearning">
   <div class="app-shell">
-    {{#allowuploads}}
-    <section class="panel" data-panel="uploads">
-      <header class="panel-header">
-        <h2>{{#str}}label:uploads, mod_chatlearning{{/str}}</h2>
-      </header>
-      <form class="upload-form" data-upload-form enctype="multipart/form-data">
-        <input type="file" name="file" data-upload-input {{#allowedmimetypes}}accept="{{allowedmimetypes}}"{{/allowedmimetypes}} />
-        <button type="submit">{{#str}}label:uploads, mod_chatlearning{{/str}}</button>
-        <p class="status" data-upload-status></p>
-      </form>
-      <form class="scrape-form" data-scrape-form>
-        <input type="url" name="url" placeholder="https://example.com/article" data-scrape-input />
-        <button type="submit" class="secondary">{{#str}}label:scrape, mod_chatlearning{{/str}}</button>
-        <p class="status" data-scrape-status></p>
-      </form>
-    </section>
-    {{/allowuploads}}
-
-    <section class="panel" data-panel="documents">
-      <header class="panel-header">
-        <h2>{{#str}}label:documents, mod_chatlearning{{/str}}</h2>
-      </header>
-      <ul class="document-list" data-document-list></ul>
-    </section>
-
-    <section class="chat-layout">
-      <article class="conversation-panel">
+    <section class="chat-workspace">
+      <aside class="panel documents-panel" data-panel="documents">
         <header class="panel-header">
-          <h2>{{#str}}label:chat, mod_chatlearning{{/str}}</h2>
+          <h2>{{#str}}label:documents, mod_chatlearning{{/str}}</h2>
+        </header>
+        <ul class="document-list" data-document-list></ul>
+      </aside>
+
+      <article class="panel conversation-panel">
+        <header class="panel-header">
+          <div>
+            <h2>{{#str}}label:chat, mod_chatlearning{{/str}}</h2>
+            <p class="panel-description">{{#str}}status:searching, mod_chatlearning{{/str}}</p>
+          </div>
         </header>
         <div class="chat-bubbles" data-chat-log></div>
         <form class="chat-form" data-chat-form>
-          <textarea name="question" rows="3" placeholder="Ask a question" data-chat-input></textarea>
-          <button type="submit">Ask</button>
+          <textarea name="question" rows="2" placeholder="{{#str}}placeholder:ask, mod_chatlearning{{/str}}" data-chat-input></textarea>
+          <button type="submit" class="send-button">{{#str}}label:send, mod_chatlearning{{/str}}</button>
         </form>
         <p class="status" data-chat-status></p>
       </article>
-      <aside class="reference-panel">
-        <header class="panel-header">
-          <h2>{{#str}}label:references, mod_chatlearning{{/str}}</h2>
-        </header>
-        <div class="reference-list" data-reference-list></div>
-      </aside>
     </section>
+
+    {{#canmanage}}
+    <section class="panel tools-panel" data-panel="tools">
+      <header class="panel-header">
+        <div>
+          <h2>{{#str}}label:tools, mod_chatlearning{{/str}}</h2>
+          <p class="panel-description">{{#str}}label:syncscope, mod_chatlearning{{/str}}: {{documentscopelabel}}</p>
+        </div>
+      </header>
+
+      {{#allowuploads}}
+      <article class="tool-card">
+        <header class="panel-header">
+          <h3>{{#str}}label:uploads, mod_chatlearning{{/str}}</h3>
+        </header>
+        <form class="upload-form" data-upload-form enctype="multipart/form-data">
+          <input type="file" name="file" data-upload-input {{#allowedmimetypes}}accept="{{allowedmimetypes}}"{{/allowedmimetypes}} />
+          <button type="submit">{{#str}}label:uploads, mod_chatlearning{{/str}}</button>
+          <p class="status" data-upload-status></p>
+        </form>
+      </article>
+
+      <article class="tool-card">
+        <header class="panel-header">
+          <h3>{{#str}}label:scrape, mod_chatlearning{{/str}}</h3>
+        </header>
+        <form class="scrape-form" data-scrape-form>
+          <input type="url" name="url" placeholder="https://example.com/article" data-scrape-input />
+          <button type="submit" class="secondary">{{#str}}label:scrape, mod_chatlearning{{/str}}</button>
+          <p class="status" data-scrape-status></p>
+        </form>
+      </article>
+      {{/allowuploads}}
+
+      {{#allowmoodlesync}}
+      <article class="tool-card">
+        <header class="panel-header">
+          <h3>{{#str}}label:syncmoodle, mod_chatlearning{{/str}}</h3>
+        </header>
+        <form class="sync-form" data-sync-form>
+          <label class="source-option">
+            <input type="checkbox" data-sync-pdf {{#sourcepdf}}checked{{/sourcepdf}} />
+            <span>{{#str}}sourcepdf, mod_chatlearning{{/str}}</span>
+          </label>
+          <label class="source-option">
+            <input type="checkbox" data-sync-scorm {{#sourcescorm}}checked{{/sourcescorm}} />
+            <span>{{#str}}sourcescorm, mod_chatlearning{{/str}}</span>
+          </label>
+          <button type="submit" class="secondary">{{#str}}label:syncmoodle, mod_chatlearning{{/str}}</button>
+          <p class="status" data-sync-status></p>
+        </form>
+      </article>
+      {{/allowmoodlesync}}
+    </section>
+    {{/canmanage}}
   </div>
 
   <div class="modal-backdrop" data-modal-backdrop></div>

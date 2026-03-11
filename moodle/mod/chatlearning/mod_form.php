@@ -24,6 +24,30 @@ class mod_chatlearning_mod_form extends moodleform_mod {
         $mform->setType('allowedmimetypes', PARAM_TEXT);
         $mform->addHelpButton('allowedmimetypes', 'allowedmimetypes', 'mod_chatlearning');
 
+        $scopeoptions = [
+            'currentcourse' => get_string('documentscope:currentcourse', 'mod_chatlearning'),
+            'enrolledcourses' => get_string('documentscope:enrolledcourses', 'mod_chatlearning'),
+            'allcourses' => get_string('documentscope:allcourses', 'mod_chatlearning'),
+        ];
+        $mform->addElement('select', 'documentscope', get_string('documentscope', 'mod_chatlearning'), $scopeoptions);
+        $mform->setType('documentscope', PARAM_ALPHA);
+        $mform->setDefault('documentscope', 'enrolledcourses');
+        $mform->addHelpButton('documentscope', 'documentscope', 'mod_chatlearning');
+
+        $mform->addElement('advcheckbox', 'allowglobaldocs', get_string('allowglobaldocs', 'mod_chatlearning'));
+        $mform->setDefault('allowglobaldocs', 0);
+        $mform->addHelpButton('allowglobaldocs', 'allowglobaldocs', 'mod_chatlearning');
+
+        $mform->addElement('advcheckbox', 'allowmoodlesync', get_string('allowmoodlesync', 'mod_chatlearning'));
+        $mform->setDefault('allowmoodlesync', 1);
+        $mform->addHelpButton('allowmoodlesync', 'allowmoodlesync', 'mod_chatlearning');
+
+        $mform->addElement('advcheckbox', 'sourcepdf', get_string('sourcepdf', 'mod_chatlearning'));
+        $mform->setDefault('sourcepdf', 1);
+
+        $mform->addElement('advcheckbox', 'sourcescorm', get_string('sourcescorm', 'mod_chatlearning'));
+        $mform->setDefault('sourcescorm', 1);
+
         $this->standard_coursemodule_elements();
 
         $this->add_action_buttons();
@@ -33,6 +57,21 @@ class mod_chatlearning_mod_form extends moodleform_mod {
         parent::data_preprocessing($data);
         if (!isset($data['allowuploads'])) {
             $data['allowuploads'] = 1;
+        }
+        if (!isset($data['documentscope'])) {
+            $data['documentscope'] = 'enrolledcourses';
+        }
+        if (!isset($data['allowglobaldocs'])) {
+            $data['allowglobaldocs'] = 0;
+        }
+        if (!isset($data['allowmoodlesync'])) {
+            $data['allowmoodlesync'] = 1;
+        }
+        if (!isset($data['sourcepdf'])) {
+            $data['sourcepdf'] = 1;
+        }
+        if (!isset($data['sourcescorm'])) {
+            $data['sourcescorm'] = 1;
         }
     }
 }

@@ -81,14 +81,41 @@ def sms_admin_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/api/documents", response_model=list[DocumentSummary])
-def list_documents(store: DocumentStore = Depends(get_document_store)) -> list[DocumentSummary]:
-    return store.list()
+def list_documents(
+    course_id: Optional[List[str]] = Query(None),
+    source_type: Optional[List[str]] = Query(None),
+    include_global: bool = Query(True),
+    store: DocumentStore = Depends(get_document_store),
+) -> list[DocumentSummary]:
+    documents = store.list()
+
+    allowed_courses = {str(item).strip() for item in (course_id or []) if str(item).strip()}
+    allowed_sources = {str(item).strip().lower() for item in (source_type or []) if str(item).strip()}
+
+    filtered: list[DocumentSummary] = []
+    for doc in documents:
+        doc_source = (doc.source_type or "").strip().lower()
+        if allowed_sources and doc_source not in allowed_sources:
+            continue
+
+        doc_course = (doc.course_id or "").strip()
+        if allowed_courses:
+            if not doc_course and not include_global:
+                continue
+            if doc_course and doc_course not in allowed_courses:
+                continue
+
+        filtered.append(doc)
+
+    return filtered
 
 
 @app.post("/api/documents", response_model=UploadResponse)
 def upload_document(
     file: UploadFile = File(...),
     course_id: Optional[str] = Form(None),
+    source_type_hint: Optional[str] = Form(None),
+    external_ref: Optional[str] = Form(None),
 ) -> UploadResponse:
     contents = file.file.read()
     if not contents:
@@ -99,6 +126,8 @@ def upload_document(
         filename=file.filename,
         content_type=file.content_type,
         course_id=course_id,  # Pass course_id to your ingest function
+        source_type_hint=source_type_hint,
+        external_ref=external_ref,
     )
     return response
 
@@ -536,4 +565,3 @@ def delete_course(course_id: str):
         return {"message": "Course deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting course: {str(e)}")
-

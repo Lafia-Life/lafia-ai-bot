@@ -4,7 +4,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 if ($hassiteconfig) {
-    $settings = new admin_settingpage('modsettingchatlearning', get_string('pluginname', 'mod_chatlearning'));
+    $settings = new admin_settingpage('modsettingchatlearning', get_string('pluginsettingsname', 'mod_chatlearning'));
 
     $settings->add(new admin_setting_configtext(
         'mod_chatlearning/baseurl',

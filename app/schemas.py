@@ -40,6 +40,7 @@ class ResourceType(str, Enum):
     VIDEO = "video"
     WEB = "web"
     IMAGE = "image"
+    SCORM = "scorm"
 
 class VideoResource(BaseModel):
     title: str
@@ -53,7 +54,8 @@ class DocumentSummary(BaseModel):
     page_count: int = 0
     source_type: str = "pdf"
     url: Optional[str] = None
-    course_id: Optional[str]=None
+    course_id: Optional[str] = None
+    external_ref: Optional[str] = None
 
 
 class UploadResponse(BaseModel):
@@ -104,6 +106,10 @@ class VideoUploadRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     conversation_id: Optional[str] = None
+    context_prompt: Optional[str] = None
+    allowed_course_ids: Optional[List[str]] = None
+    allowed_source_types: Optional[List[str]] = None
+    include_global_docs: bool = False
 
 
 class Citation(BaseModel):
@@ -116,6 +122,7 @@ class Citation(BaseModel):
     excerpt: str
     source_type: str = "pdf"
     url: Optional[str] = None
+    course_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

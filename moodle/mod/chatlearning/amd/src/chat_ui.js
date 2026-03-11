@@ -12,9 +12,10 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
 
     const STRING_DEFINITIONS = [
         {key: 'status:nodocuments', component: 'mod_chatlearning', identifier: 'nodocuments'},
-        {key: 'status:noreferences', component: 'mod_chatlearning', identifier: 'noreferences'},
         {key: 'status:searching', component: 'mod_chatlearning', identifier: 'searching'},
         {key: 'status:uploading', component: 'mod_chatlearning', identifier: 'uploading'},
+        {key: 'status:syncing', component: 'mod_chatlearning', identifier: 'syncing'},
+        {key: 'status:synccomplete', component: 'mod_chatlearning', identifier: 'synccomplete'},
     ];
 
     function $(selector) {
@@ -27,6 +28,10 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         }
         node.textContent = message || '';
         node.style.color = style || '';
+    }
+
+    function formatMessageTime() {
+        return new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
     }
 
     function startThinkingAnimation(bubble) {
@@ -64,13 +69,13 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         if (download) {
             download.removeAttribute('href');
         }
-        elements.root.querySelectorAll('.reference-card.active').forEach(function(card) {
-            card.classList.remove('active');
+        elements.root.querySelectorAll('.citation-chip.active').forEach(function(node) {
+            node.classList.remove('active');
         });
         state.activePreview = null;
     }
 
-    function showPreview(citation, card) {
+    function showPreview(citation, trigger) {
         const dialog = elements.modalDialog;
         if (!dialog) {
             return;
@@ -82,14 +87,17 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         const title = dialog.querySelector('[data-modal-title]');
         const download = dialog.querySelector('[data-modal-download]');
 
-        elements.root.querySelectorAll('.reference-card.active').forEach(function(node) {
+        elements.root.querySelectorAll('.citation-chip.active').forEach(function(node) {
             node.classList.remove('active');
         });
-        card.classList.add('active');
+        if (trigger) {
+            trigger.classList.add('active');
+        }
 
-        frame.src = config.documentBase + citation.document_id + '/inline#page=' + citation.page_start;
+        const page = citation.page_start || 1;
+        frame.src = config.documentBase + citation.document_id + '/inline#page=' + page;
         if (title) {
-            title.textContent = citation.filename + ' · page ' + citation.page_start;
+            title.textContent = citation.filename + ' · page ' + page;
         }
         if (download) {
             download.href = config.documentBase + citation.document_id + '/download';
@@ -106,15 +114,24 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
 
         state.activePreview = {
             documentId: citation.document_id,
-            pageStart: citation.page_start,
+            pageStart: page,
         };
     }
 
-    function appendMessage(role, content) {
+    function appendMessage(role, content, timestamp) {
+        const message = document.createElement('div');
+        message.className = 'chat-message ' + role;
+
         const bubble = document.createElement('div');
         bubble.className = 'chat-bubble ' + role;
         bubble.textContent = content;
-        elements.chatLog.appendChild(bubble);
+
+        const meta = document.createElement('div');
+        meta.className = 'chat-meta';
+        meta.textContent = timestamp || formatMessageTime();
+
+        message.append(bubble, meta);
+        elements.chatLog.appendChild(message);
         elements.chatLog.scrollTop = elements.chatLog.scrollHeight;
         return bubble;
     }
@@ -123,100 +140,93 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         elements.documentList.innerHTML = '';
         if (!documents.length) {
             const li = document.createElement('li');
+            li.className = 'document-empty';
             li.textContent = strings.nodocuments || 'No documents indexed yet.';
             elements.documentList.appendChild(li);
             return;
         }
         documents.forEach(function(doc) {
             const li = document.createElement('li');
-            li.textContent = doc.filename;
+            const name = document.createElement('span');
+            name.className = 'document-name';
+            name.textContent = doc.filename;
             const meta = document.createElement('span');
             meta.className = 'document-meta';
             if (doc.source_type === 'web' && doc.url) {
                 meta.textContent = 'Web · ' + doc.url;
             } else if (doc.source_type === 'image') {
                 meta.textContent = 'Image · ' + (doc.page_count || 1) + ' frames';
+            } else if (doc.source_type === 'scorm') {
+                meta.textContent = 'SCORM · ' + (doc.page_count || 0) + ' sections';
             } else {
                 meta.textContent = 'PDF · ' + (doc.page_count || 0) + ' pages';
             }
-            li.appendChild(meta);
+            li.append(name, meta);
             elements.documentList.appendChild(li);
         });
     }
 
-    function renderReferences(citations) {
-        elements.referenceList.innerHTML = '';
+    function citationLabel(citation) {
+        const name = citation.filename || 'Source';
+        const start = citation.page_start || 1;
+        const end = citation.page_end || start;
+        if (citation.source_type === 'web' || citation.source_type === 'scorm') {
+            return name + ' §' + start;
+        }
+        return name + ' p.' + start + (end > start ? '-' + end : '');
+    }
+
+    function renderInlineReferences(citations, assistantBubble) {
+        const message = assistantBubble ? assistantBubble.closest('.chat-message') : null;
+        if (!message) {
+            return;
+        }
+        const existing = message.querySelector('.inline-citations');
+        if (existing) {
+            existing.remove();
+        }
+
         if (!citations || !citations.length) {
-            const placeholder = document.createElement('p');
-            placeholder.className = 'reference-placeholder';
-            placeholder.textContent = strings.noreferences || 'No supporting references found yet.';
-            elements.referenceList.appendChild(placeholder);
             clearPreview();
             return;
         }
 
-        const previewIndex = new Map();
+        const wrap = document.createElement('div');
+        wrap.className = 'inline-citations';
+
         citations.forEach(function(citation) {
-            const card = document.createElement('article');
-            card.className = 'reference-card';
-            card.dataset.type = citation.source_type || 'pdf';
-
-            const title = document.createElement('h4');
-            title.textContent = citation.filename;
-            const meta = document.createElement('p');
-            meta.className = 'reference-meta';
-            const location = citation.source_type === 'web'
-                ? 'Section ' + citation.page_start
-                : 'Pages ' + citation.page_start + '-' + citation.page_end;
-            meta.textContent = location + ' · score ' + Number(citation.score || 0).toFixed(2);
-
-            const excerpt = document.createElement('p');
-            excerpt.className = 'reference-excerpt';
-            excerpt.textContent = citation.excerpt || '';
-
-            card.append(title, meta, excerpt);
-
-            if (citation.source_type === 'pdf') {
-                const hint = document.createElement('p');
-                hint.className = 'reference-hint';
-                hint.textContent = 'Click to preview this PDF section.';
-                card.appendChild(hint);
-                card.tabIndex = 0;
-                card.setAttribute('role', 'button');
-                const select = function() {
-                    showPreview(citation, card);
-                };
-                card.addEventListener('click', select);
-                card.addEventListener('keydown', function(event) {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        select();
-                    }
+            if (citation.source_type === 'pdf' && citation.document_id && config.documentBase) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'citation-chip';
+                button.textContent = citationLabel(citation);
+                button.title = 'Open in viewer';
+                button.addEventListener('click', function() {
+                    showPreview(citation, button);
                 });
-                const key = citation.document_id + ':' + citation.page_start;
-                if (!previewIndex.has(key)) {
-                    previewIndex.set(key, select);
-                }
-            } else if (citation.url) {
+                wrap.appendChild(button);
+                return;
+            }
+
+            if (citation.url) {
                 const link = document.createElement('a');
                 link.href = citation.url;
-                link.textContent = 'Open source';
                 link.target = '_blank';
                 link.rel = 'noopener noreferrer';
-                link.className = 'reference-link';
-                card.appendChild(link);
+                link.className = 'citation-chip link';
+                link.textContent = citationLabel(citation);
+                wrap.appendChild(link);
+                return;
             }
 
-            elements.referenceList.appendChild(card);
+            const chip = document.createElement('span');
+            chip.className = 'citation-chip disabled';
+            chip.textContent = citationLabel(citation);
+            wrap.appendChild(chip);
         });
 
-        if (state.activePreview) {
-            const key = state.activePreview.documentId + ':' + state.activePreview.pageStart;
-            const select = previewIndex.get(key);
-            if (select) {
-                select();
-            }
-        }
+        message.appendChild(wrap);
+        elements.chatLog.scrollTop = elements.chatLog.scrollHeight;
     }
 
     function fetchDocuments() {
@@ -244,7 +254,7 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         const formData = new FormData();
         formData.append('file', file);
 
-    setStatus(status, strings.uploading || 'Uploading...');
+        setStatus(status, strings.uploading || 'Uploading...');
 
         fetch(config.uploadEndpoint, {
             method: 'POST',
@@ -298,6 +308,42 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
             });
     }
 
+    function handleMoodleSync(event) {
+        event.preventDefault();
+
+        const status = elements.syncStatus;
+        const includePdf = !!(elements.syncPdf && elements.syncPdf.checked);
+        const includeScorm = !!(elements.syncScorm && elements.syncScorm.checked);
+
+        if (!includePdf && !includeScorm) {
+            setStatus(status, 'Select at least one source type.', '#dc2626');
+            return;
+        }
+
+        setStatus(status, strings.syncing || 'Syncing Moodle files...');
+
+        Ajax.call([
+            {
+                methodname: 'mod_chatlearning_sync_moodle_documents',
+                args: {
+                    cmid: config.cmid,
+                    include_pdf: includePdf,
+                    include_scorm: includeScorm,
+                    sesskey: config.sesskey,
+                },
+            },
+        ])[0]
+            .then(function(payload) {
+                var indexed = payload && payload.documents_indexed ? payload.documents_indexed : 0;
+                var template = strings.synccomplete || 'Sync complete: {$a} documents indexed.';
+                setStatus(status, template.replace('{$a}', String(indexed)));
+                fetchDocuments();
+            })
+            .catch(function(err) {
+                setStatus(status, err && err.message ? err.message : 'Moodle sync failed', '#dc2626');
+            });
+    }
+
     function handleChat(event) {
         event.preventDefault();
         const question = elements.chatInput.value.trim();
@@ -308,15 +354,14 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         const assistantBubble = appendMessage('assistant', 'Thinking...');
         assistantBubble.dataset.placeholder = 'true';
         startThinkingAnimation(assistantBubble);
+        const submitButton = elements.chatForm ? elements.chatForm.querySelector('button[type="submit"]') : null;
 
         elements.chatInput.value = '';
+        elements.chatInput.disabled = true;
+        if (submitButton) {
+            submitButton.disabled = true;
+        }
         setStatus(elements.chatStatus, '');
-
-        elements.referenceList.innerHTML = '';
-        const searching = document.createElement('p');
-        searching.className = 'reference-placeholder';
-        searching.textContent = strings.searching || 'Searching supporting passages...';
-        elements.referenceList.appendChild(searching);
 
         Ajax.call([
             {
@@ -328,12 +373,22 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
                 stopThinkingAnimation(assistantBubble);
                 assistantBubble.textContent = payload && payload.answer ? payload.answer : '';
                 assistantBubble.dataset.placeholder = 'false';
-                renderReferences(payload && payload.citations ? payload.citations : []);
+                renderInlineReferences(payload && payload.citations ? payload.citations : [], assistantBubble);
+                elements.chatInput.disabled = false;
+                if (submitButton) {
+                    submitButton.disabled = false;
+                }
+                elements.chatInput.focus();
             })
             .catch(function(err) {
                 stopThinkingAnimation(assistantBubble);
                 assistantBubble.textContent = 'Request failed';
                 setStatus(elements.chatStatus, err && err.message ? err.message : 'Chat failed', '#dc2626');
+                elements.chatInput.disabled = false;
+                if (submitButton) {
+                    submitButton.disabled = false;
+                }
+                elements.chatInput.focus();
             });
     }
 
@@ -344,8 +399,21 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         if (elements.scrapeForm) {
             elements.scrapeForm.addEventListener('submit', handleScrape);
         }
+        if (elements.syncForm) {
+            elements.syncForm.addEventListener('submit', handleMoodleSync);
+        }
         if (elements.chatForm) {
             elements.chatForm.addEventListener('submit', handleChat);
+        }
+        if (elements.chatInput) {
+            elements.chatInput.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    if (elements.chatForm) {
+                        elements.chatForm.requestSubmit();
+                    }
+                }
+            });
         }
         if (elements.modalClose) {
             elements.modalClose.addEventListener('click', clearPreview);
@@ -370,13 +438,16 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         }
 
         elements.documentList = elements.root.querySelector('[data-document-list]');
-        elements.referenceList = elements.root.querySelector('[data-reference-list]');
         elements.uploadForm = elements.root.querySelector('[data-upload-form]');
         elements.uploadInput = elements.root.querySelector('[data-upload-input]');
         elements.uploadStatus = elements.root.querySelector('[data-upload-status]');
         elements.scrapeForm = elements.root.querySelector('[data-scrape-form]');
         elements.scrapeInput = elements.root.querySelector('[data-scrape-input]');
         elements.scrapeStatus = elements.root.querySelector('[data-scrape-status]');
+        elements.syncForm = elements.root.querySelector('[data-sync-form]');
+        elements.syncPdf = elements.root.querySelector('[data-sync-pdf]');
+        elements.syncScorm = elements.root.querySelector('[data-sync-scorm]');
+        elements.syncStatus = elements.root.querySelector('[data-sync-status]');
         elements.chatForm = elements.root.querySelector('[data-chat-form]');
         elements.chatInput = elements.root.querySelector('[data-chat-input]');
         elements.chatLog = elements.root.querySelector('[data-chat-log]');
@@ -393,6 +464,8 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         }
 
         bindEvents();
+
+        appendMessage('assistant', 'Hello! Ask me anything about the indexed course documents.');
 
         Str.get_strings(
             STRING_DEFINITIONS.map(function(def) {

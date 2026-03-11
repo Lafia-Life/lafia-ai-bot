@@ -4,6 +4,16 @@
 defined('MOODLE_INTERNAL') || die();
 
 $capabilities = [
+    'mod/chatlearning:addinstance' => [
+        'riskbitmask' => RISK_XSS,
+        'captype' => 'write',
+        'contextlevel' => CONTEXT_COURSE,
+        'archetypes' => [
+            'manager' => CAP_ALLOW,
+            'editingteacher' => CAP_ALLOW,
+        ],
+        'clonepermissionsfrom' => 'moodle/course:manageactivities',
+    ],
     'mod/chatlearning:view' => [
         'captype' => 'read',
         'contextlevel' => CONTEXT_MODULE,
@@ -21,6 +31,7 @@ $capabilities = [
         'archetypes' => [
             'manager' => CAP_ALLOW,
             'editingteacher' => CAP_ALLOW,
+            'teacher' => CAP_ALLOW,
         ],
     ],
 ];

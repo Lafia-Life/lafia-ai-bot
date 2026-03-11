@@ -33,3 +33,12 @@ class DocumentStore:
         data = self._read()
         record = data.get(document_id)
         return DocumentSummary(**record) if record else None
+
+    def find_by_external_ref(self, external_ref: str) -> Optional[DocumentSummary]:
+        if not external_ref:
+            return None
+        data = self._read()
+        for record in data.values():
+            if record.get("external_ref") == external_ref:
+                return DocumentSummary(**record)
+        return None
