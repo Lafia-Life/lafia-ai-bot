@@ -58,8 +58,30 @@ class client {
         return $this->request('post', '/api/scrape', [], $payload);
     }
 
+    public function delete_document(stdClass $context, string $documentid): array {
+        $payload = $this->build_context_params($context);
+        $path = '/api/documents/' . rawurlencode($documentid) . '/delete';
+        return $this->request('post', $path, [], $payload);
+    }
+
+    private function create_curl_client(): curl {
+        return new curl();
+    }
+
+    private function build_request_options(array $headers = []): array {
+        $options = [
+            'CURLOPT_TIMEOUT' => $this->timeout,
+            'CURLOPT_SSL_VERIFYPEER' => 1,
+            'CURLOPT_SSL_VERIFYHOST' => 2,
+        ];
+        if (!empty($headers)) {
+            $options['CURLOPT_HTTPHEADER'] = $headers;
+        }
+        return $options;
+    }
+
     private function request(string $method, string $path, array $query = [], ?array $body = null): array {
-        $curl = new curl(['timeout' => $this->timeout, 'ssl_verifypeer' => true, 'ssl_verifyhost' => 2]);
+        $curl = $this->create_curl_client();
         $url = $this->baseurl . $path;
 
         if (!empty($query)) {
@@ -73,17 +95,17 @@ class client {
 
         switch ($method) {
             case 'get':
-                $response = $curl->get($url, null, $headers);
+                $response = $curl->get($url, $this->build_request_options($headers));
                 break;
             case 'post':
                 $headers[] = 'Content-Type: application/json';
-                $response = $curl->post($url, json_encode($body ?? []), $headers);
+                $response = $curl->post($url, json_encode($body ?? []), $this->build_request_options($headers));
                 break;
             case 'upload':
                 if ($body === null) {
                     throw new coding_exception('Upload request requires a body.');
                 }
-                $response = $curl->post($url, $body, $headers);
+                $response = $curl->post($url, $body, $this->build_request_options($headers));
                 break;
             default:
                 throw new coding_exception('Unsupported method: ' . $method);
@@ -105,7 +127,7 @@ class client {
     }
 
     private function request_stream(string $path, array $body): array {
-        $curl = new curl(['timeout' => $this->timeout, 'ssl_verifypeer' => true, 'ssl_verifyhost' => 2]);
+        $curl = $this->create_curl_client();
         $url = $this->baseurl . $path;
 
         $headers = ['Accept: application/x-ndjson', 'Content-Type: application/json'];
@@ -113,7 +135,7 @@ class client {
             $headers[] = 'Authorization: Bearer ' . $this->apikey;
         }
 
-        $response = $curl->post($url, json_encode($body), $headers);
+        $response = $curl->post($url, json_encode($body), $this->build_request_options($headers));
         $info = $curl->get_info();
         $status = $info['http_code'] ?? 0;
 
@@ -168,14 +190,14 @@ class client {
             'moodle_username' => $context->username,
             'moodle_fullname' => $context->fullname,
             'chatlearning_instance' => $context->instanceid,
-            'course_id' => $context->courseid,
+            'course_id' => (string)$context->courseid,
             'include_global_docs' => !empty($context->includeglobaldocs),
         ];
         if (!empty($context->allowedcourseids) && is_array($context->allowedcourseids)) {
-            $params['allowed_course_ids'] = array_values($context->allowedcourseids);
+            $params['allowed_course_ids'] = array_map('strval', array_values($context->allowedcourseids));
         }
         if (!empty($context->allowedsourcetypes) && is_array($context->allowedsourcetypes)) {
-            $params['allowed_source_types'] = array_values($context->allowedsourcetypes);
+            $params['allowed_source_types'] = array_map('strval', array_values($context->allowedsourcetypes));
         }
         return $params;
     }

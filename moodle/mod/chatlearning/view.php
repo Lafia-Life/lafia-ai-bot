@@ -23,8 +23,30 @@ $renderer = $PAGE->get_renderer('mod_chatlearning');
 $pluginconfig = get_config('mod_chatlearning');
 $apibase = rtrim((string)($pluginconfig->baseurl ?? ''), '/');
 
+$documentscope = $chatlearning->documentscope ?? 'enrolledcourses';
+if (!in_array($documentscope, ['currentcourse', 'enrolledcourses', 'allcourses'], true)) {
+    $documentscope = 'enrolledcourses';
+}
+if ($documentscope === 'allcourses' && !$canmanage) {
+    $documentscope = 'enrolledcourses';
+}
+
+$allowedcourseids = [];
+if ($documentscope === 'currentcourse') {
+    $allowedcourseids = [(string)$course->id];
+} else if ($documentscope === 'enrolledcourses') {
+    require_once($CFG->libdir . '/enrollib.php');
+    $enrolledcourses = enrol_get_all_users_courses($USER->id, true, 'id');
+    $allowedcourseids = array_map('strval', array_keys($enrolledcourses));
+    $allowedcourseids[] = (string)$course->id;
+    $allowedcourseids = array_values(array_unique(array_filter($allowedcourseids, function(string $id): bool {
+        return $id !== '';
+    })));
+}
+
 $jsconfig = [
     'cmid' => $cm->id,
+    'courseId' => (string)$course->id,
     'sesskey' => sesskey(),
     'contextPrompt' => $chatlearning->contextprompt ?? '',
     'allowUploads' => (bool)$chatlearning->allowuploads,
@@ -32,7 +54,8 @@ $jsconfig = [
     'canManage' => $canmanage,
     'sourcePdf' => (bool)($chatlearning->sourcepdf ?? 1),
     'sourceScorm' => (bool)($chatlearning->sourcescorm ?? 1),
-    'documentScope' => $chatlearning->documentscope ?? 'enrolledcourses',
+    'documentScope' => $documentscope,
+    'allowedCourseIds' => $allowedcourseids,
     'includeGlobalDocs' => (bool)($chatlearning->allowglobaldocs ?? 0),
     'allowedMimeTypes' => $chatlearning->allowedmimetypes ?? '',
     'apiBase' => $apibase,
@@ -47,10 +70,6 @@ if (!empty($chatlearning->intro)) {
     echo $OUTPUT->box(format_module_intro('chatlearning', $chatlearning, $cm->id), 'generalbox mod_introbox');
 }
 
-$documentscope = $chatlearning->documentscope ?? 'enrolledcourses';
-if (!in_array($documentscope, ['currentcourse', 'enrolledcourses', 'allcourses'], true)) {
-    $documentscope = 'enrolledcourses';
-}
 $documentscopelabel = get_string('documentscope:' . $documentscope, 'mod_chatlearning');
 
 $templatecontext = [

@@ -42,3 +42,11 @@ class DocumentStore:
             if record.get("external_ref") == external_ref:
                 return DocumentSummary(**record)
         return None
+
+    def delete(self, document_id: str) -> bool:
+        data = self._read()
+        if document_id not in data:
+            return False
+        data.pop(document_id, None)
+        self._write(data)
+        return True

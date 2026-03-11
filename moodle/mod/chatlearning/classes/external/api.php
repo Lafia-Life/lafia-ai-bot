@@ -153,6 +153,62 @@ class api extends external_api {
         ]);
     }
 
+    public static function delete_document_parameters(): external_function_parameters {
+        return new external_function_parameters([
+            'cmid' => new external_value(PARAM_INT, 'Course module ID'),
+            'document_id' => new external_value(PARAM_TEXT, 'Document identifier'),
+        ]);
+    }
+
+    public static function delete_document(int $cmid, string $document_id): array {
+        global $DB;
+
+        ['cmid' => $cmid, 'document_id' => $document_id] = self::validate_parameters(
+            self::delete_document_parameters(),
+            ['cmid' => $cmid, 'document_id' => $document_id]
+        );
+
+        $cm = get_coursemodule_from_id('chatlearning', $cmid, 0, false, MUST_EXIST);
+        $course = get_course($cm->course);
+        $instance = $DB->get_record('chatlearning', ['id' => $cm->instance], '*', MUST_EXIST);
+        $context = context_module::instance($cmid);
+
+        self::validate_context($context);
+        require_login($course, false, $cm);
+        require_capability('mod/chatlearning:manage', $context);
+
+        $payload = self::build_context_payload($cmid, $course->id, $instance, $context);
+        $client = new client();
+        $documents = self::filter_documents($client->get_documents($payload), $payload);
+
+        $alloweddocumentids = array_map(function(array $document): string {
+            return (string)($document['document_id'] ?? '');
+        }, $documents);
+
+        if (!in_array($document_id, $alloweddocumentids, true)) {
+            throw new moodle_exception(
+                'status:error',
+                'mod_chatlearning',
+                '',
+                'This document is not available in the current activity scope.'
+            );
+        }
+
+        $result = $client->delete_document($payload, $document_id);
+
+        return [
+            'deleted' => (bool)($result['deleted'] ?? true),
+            'document_id' => $result['document_id'] ?? $document_id,
+        ];
+    }
+
+    public static function delete_document_returns(): external_single_structure {
+        return new external_single_structure([
+            'deleted' => new external_value(PARAM_BOOL, 'True when the document was deleted'),
+            'document_id' => new external_value(PARAM_TEXT, 'Deleted document identifier'),
+        ]);
+    }
+
     public static function sync_moodle_documents_parameters(): external_function_parameters {
         return new external_function_parameters([
             'cmid' => new external_value(PARAM_INT, 'Course module ID'),
@@ -336,6 +392,10 @@ class api extends external_api {
             require_once($CFG->libdir . '/enrollib.php');
             $courses = enrol_get_all_users_courses($USER->id, true, 'id');
             $courseids = array_map('intval', array_keys($courses));
+            $courseids[] = (int)$defaultcourseid; // Always include the activity course.
+            $courseids = array_values(array_unique(array_filter($courseids, function(int $id): bool {
+                return $id > 0;
+            })));
             if (!empty($courseids)) {
                 return $courseids;
             }

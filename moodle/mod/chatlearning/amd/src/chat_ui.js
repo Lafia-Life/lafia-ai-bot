@@ -16,6 +16,9 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         {key: 'status:uploading', component: 'mod_chatlearning', identifier: 'uploading'},
         {key: 'status:syncing', component: 'mod_chatlearning', identifier: 'syncing'},
         {key: 'status:synccomplete', component: 'mod_chatlearning', identifier: 'synccomplete'},
+        {key: 'status:deleting', component: 'mod_chatlearning', identifier: 'deleting'},
+        {key: 'status:deleted', component: 'mod_chatlearning', identifier: 'deleted'},
+        {key: 'label:delete', component: 'mod_chatlearning', identifier: 'delete'},
     ];
 
     function $(selector) {
@@ -137,6 +140,9 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
     }
 
     function renderDocuments(documents) {
+        if (!elements.documentList) {
+            return;
+        }
         elements.documentList.innerHTML = '';
         if (!documents.length) {
             const li = document.createElement('li');
@@ -147,6 +153,8 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         }
         documents.forEach(function(doc) {
             const li = document.createElement('li');
+            const main = document.createElement('div');
+            main.className = 'document-main';
             const name = document.createElement('span');
             name.className = 'document-name';
             name.textContent = doc.filename;
@@ -161,8 +169,57 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
             } else {
                 meta.textContent = 'PDF · ' + (doc.page_count || 0) + ' pages';
             }
-            li.append(name, meta);
+
+            main.append(name, meta);
+            li.append(main);
+
+            if (config.canManage) {
+                const actions = document.createElement('div');
+                actions.className = 'document-actions';
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'document-delete';
+                removeBtn.textContent = strings.delete || 'Delete';
+                removeBtn.title = 'Delete indexed document';
+                removeBtn.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleDeleteDocument(doc);
+                });
+                actions.appendChild(removeBtn);
+                li.append(actions);
+            }
+
             elements.documentList.appendChild(li);
+        });
+    }
+
+    function scopeDocumentsForDisplay(documents) {
+        const list = Array.isArray(documents) ? documents : [];
+        const includeGlobal = !!config.includeGlobalDocs;
+        const scope = String(config.documentScope || '').trim().toLowerCase();
+        const hasScopedFilter = scope === 'currentcourse' || scope === 'enrolledcourses';
+
+        const allowed = Array.isArray(config.allowedCourseIds)
+            ? config.allowedCourseIds.map(function(id) { return String(id).trim(); }).filter(Boolean)
+            : [];
+        const allowedSet = new Set(allowed);
+
+        return list.filter(function(doc) {
+            var docCourseId = doc && doc.course_id !== undefined && doc.course_id !== null
+                ? String(doc.course_id).trim()
+                : '';
+
+            if (!docCourseId) {
+                return includeGlobal;
+            }
+            if (allowedSet.size > 0) {
+                return allowedSet.has(docCourseId);
+            }
+            if (hasScopedFilter) {
+                return false;
+            }
+            return true;
         });
     }
 
@@ -230,6 +287,9 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
     }
 
     function fetchDocuments() {
+        if (!elements.documentList) {
+            return;
+        }
         Ajax.call([
             {
                 methodname: 'mod_chatlearning_get_documents',
@@ -237,10 +297,42 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
             },
         ])[0]
             .then(function(docs) {
-                state.documents = docs || [];
+                state.documents = scopeDocumentsForDisplay(docs || []);
                 renderDocuments(state.documents);
             })
             .catch(Notification.exception);
+    }
+
+    function handleDeleteDocument(document) {
+        if (!document || !document.document_id) {
+            return;
+        }
+
+        const label = document.filename || 'this document';
+        const confirmed = window.confirm('Delete "' + label + '" from indexed documents?');
+        if (!confirmed) {
+            return;
+        }
+
+        setStatus(elements.documentStatus, strings.deleting || 'Deleting document...');
+
+        Ajax.call([
+            {
+                methodname: 'mod_chatlearning_delete_document',
+                args: {
+                    cmid: Number(config.cmid),
+                    document_id: String(document.document_id),
+                },
+            },
+        ])[0]
+            .then(function() {
+                setStatus(elements.documentStatus, strings.deleted || 'Document deleted.');
+                fetchDocuments();
+            })
+            .catch(function(err) {
+                const message = err && err.message ? err.message : 'Delete failed';
+                setStatus(elements.documentStatus, message, '#dc2626');
+            });
     }
 
     function handleUpload(event) {
@@ -441,6 +533,7 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         }
 
         elements.documentList = elements.root.querySelector('[data-document-list]');
+        elements.documentStatus = elements.root.querySelector('[data-document-status]');
         elements.uploadForm = elements.root.querySelector('[data-upload-form]');
         elements.uploadInput = elements.root.querySelector('[data-upload-input]');
         elements.uploadStatus = elements.root.querySelector('[data-upload-status]');

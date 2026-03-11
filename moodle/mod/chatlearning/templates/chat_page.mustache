@@ -1,14 +1,17 @@
 <div class="mod-chatlearning" data-component="chatlearning">
   <div class="app-shell">
     <section class="chat-workspace">
+      {{#canmanage}}
       <aside class="panel documents-panel" data-panel="documents">
         <header class="panel-header">
           <h2>{{#str}}label:documents, mod_chatlearning{{/str}}</h2>
         </header>
         <ul class="document-list" data-document-list></ul>
+        <p class="status" data-document-status></p>
       </aside>
+      {{/canmanage}}
 
-      <article class="panel conversation-panel">
+      <article class="panel conversation-panel {{^canmanage}}full-width{{/canmanage}}">
         <header class="panel-header">
           <div>
             <h2>{{#str}}label:chat, mod_chatlearning{{/str}}</h2>

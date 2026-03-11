@@ -15,6 +15,7 @@ from app.services.document_store import DocumentStore
 from app.services.video_store import VideoStore
 from app.services.ingestion import ingest_document, ingest_web_page
 from app.services.retrieval import stream_answer, answer_question
+from app.services.vectorstore import get_collection
 from app.services.sms_service import send_sms_response, parse_incoming_sms
 # from app.whatsapp_chat import app as whatsapp_app
 from starlette.requests import Request
@@ -55,6 +56,36 @@ def _resolve_document_path(document_id: str, store: DocumentStore) -> tuple[Docu
         raise HTTPException(status_code=404, detail="Stored PDF could not be located.")
 
     return summary, matches[0]
+
+
+def _remove_document_assets(document_id: str) -> None:
+    patterns = (f"{document_id}_*", f"{document_id}.txt")
+    for pattern in patterns:
+        for path in settings.uploads_path.glob(pattern):
+            if not path.is_file():
+                continue
+            try:
+                path.unlink()
+            except OSError:
+                continue
+
+
+def _delete_document_by_id(document_id: str, store: DocumentStore) -> DocumentSummary:
+    summary = store.get(document_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    collection = get_collection()
+    try:
+        collection.delete(where={"document_id": document_id})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Failed to remove document from vector index: {exc}") from exc
+
+    if not store.delete(document_id):
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    _remove_document_assets(document_id)
+    return summary
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -130,6 +161,26 @@ def upload_document(
         external_ref=external_ref,
     )
     return response
+
+
+@app.delete("/api/documents/{document_id}")
+def delete_document(document_id: str, store: DocumentStore = Depends(get_document_store)) -> dict:
+    summary = _delete_document_by_id(document_id, store)
+    return {
+        "deleted": True,
+        "document_id": summary.document_id,
+        "filename": summary.filename,
+    }
+
+
+@app.post("/api/documents/{document_id}/delete")
+def delete_document_compat(document_id: str, store: DocumentStore = Depends(get_document_store)) -> dict:
+    summary = _delete_document_by_id(document_id, store)
+    return {
+        "deleted": True,
+        "document_id": summary.document_id,
+        "filename": summary.filename,
+    }
 
 
 @app.post("/api/scrape", response_model=UploadResponse)
