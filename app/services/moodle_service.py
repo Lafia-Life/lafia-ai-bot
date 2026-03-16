@@ -81,12 +81,25 @@ def get_moodle_course_contents(course_id: str):
             "videos": [],
             "pdfs": [],
             "powerpoints": [],
+            "quizzes": [],
+
         }
 
         for module in section.get("modules", []):
             module_name = module.get("name", "Untitled")
             module_type = module.get("modname")
             module_cmid = module.get("id")
+
+            if module_type == "quiz":
+                quiz_obj = {
+                    "title": module_name,
+                    "cmid": module_cmid,
+                    "course_id": course_id,
+                    "instance": module.get("instance"),
+                    "url": module.get("url")
+                }
+
+                section_obj["quizzes"].append(quiz_obj)
 
             for content in module.get("contents", []):
                 file_url = content.get("fileurl")
@@ -148,20 +161,20 @@ def get_available_courses():
 
     moodle_courses = get_moodle_courses()
     courses = {}
-
     for course_id, course in moodle_courses.items():
         try:
             contents = get_moodle_course_contents(course_id)
-
             # Aggregate resources
             course_pdfs = []
             course_videos = []
             course_powerpoints = []
+            course_quizzes = []
 
             for section in contents["sections"]:
                 course_pdfs.extend(section.get("pdfs", []))
                 course_videos.extend(section.get("videos", []))
                 course_powerpoints.extend(section.get("powerpoints", []))
+                course_quizzes.extend(section.get("quizzes", []))
 
             courses[course_id] = {
                 "id": course_id,
@@ -170,6 +183,8 @@ def get_available_courses():
                 "videos": course_videos,
                 "powerpoints": course_powerpoints,
                 "sections": contents["sections"],
+                "quizzes": course_quizzes,
+
             }
         except Exception as e:
             print(f"❌ Failed to load course {course['name']}: {e}")
@@ -656,3 +671,30 @@ def authenticate_moodle_user(username: str, password: str):
         import traceback
         traceback.print_exc()
         return None
+
+
+def get_course_quizzes(course_id: int):
+    """Fetch quizzes for a course"""
+    try:
+        ws_url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+
+        params = {
+            "wstoken": MOODLE_TOKEN,
+            "wsfunction": "mod_quiz_get_quizzes_by_courses",
+            "courseids[0]": course_id,
+            "moodlewsrestformat": "json"
+        }
+
+        response = requests.post(ws_url, data=params, verify=False, timeout=15)
+
+        if response.status_code == 200:
+            data = response.json()
+
+            if isinstance(data, dict) and data.get("quizzes"):
+                return data["quizzes"]
+
+        return []
+
+    except Exception as e:
+        print(f"❌ Error getting quizzes: {e}")
+        return []

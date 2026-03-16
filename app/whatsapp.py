@@ -254,7 +254,7 @@ def serve_video(filename: str):
         }
     )
 
-def create_smart_video_response(video_urls, course_name, course_id, token, base_url: str = "https://2b76-41-75-184-245.ngrok-free.app"):
+def create_smart_video_response(video_urls, course_name, course_id, token, base_url: str = "https://fd9e-41-75-172-172.ngrok-free.app"):
     """Download videos and serve them DIRECTLY in WhatsApp messages"""
 
     if not video_urls:
@@ -526,6 +526,40 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
                 return Response(content=raw_xml, media_type="application/xml")
             
+            # ===== TAKE QUIZ INTENT =====
+            elif intent.get('action') == 'take_quiz':
+                # User wanted to take a quiz
+                # Clear intent
+                user_moodle_data[phone].pop('original_intent', None)
+                
+                # Get enrolled courses
+                token = auth_result['token']
+                userid = auth_result['userid']
+                enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
+                
+                if not enrolled_courses:
+                    response_text = (
+                        "📝 *Take a Quiz*\n\n"
+                        "You are not enrolled in any courses yet.\n\n"
+                        "💡 Browse courses (option 1) to enroll in new courses.\n\n"
+                        "0️⃣ Main Menu • #️⃣ Exit"
+                    )
+                    user_state[phone] = "main_menu"
+                else:
+                    course_list = "\n".join([f"{i+1}. {course['name']}" for i, course in enumerate(enrolled_courses)])
+                    response_text = (
+                        "📝 *Select a Course for Quiz*\n\n"
+                        f"{course_list}\n\n"
+                        "0️⃣ Main Menu • #️⃣ Exit\n\n"
+                        "Select a course number to view its quizzes:"
+                    )
+                    user_state[phone] = "quiz_course_selection"
+                
+                escaped_text = escape_xml(response_text)
+                raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+                return Response(content=raw_xml, media_type="application/xml")
+            
             elif intent.get('action') == 'check_enrollment':
                 # User wanted to check enrollment for a course they browsed
                 course_id = intent['course_id']
@@ -557,10 +591,12 @@ async def handle_moodle_login_flow(phone, raw_msg):
                         f"📊 *Course Overview:*\n"
                         f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
                         f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                        f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
                         "What would you like to access?\n"
                         "1️⃣ Study Materials (PDFs)\n"
                         "2️⃣ Video Lessons\n"
-                        "3️⃣ Course Overview\n\n"
+                        "3️⃣ Take Quizzes\n"
+                        "4️⃣ Course Overview\n\n"
                         "💡 *Navigation:*\n"
                         "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
                     )
@@ -572,6 +608,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
                         f"📊 *Course Overview:*\n"
                         f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
                         f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                        f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
                         "🔒 *You are NOT enrolled in this course*\n\n"
                         "1️⃣ Enroll in this Course\n\n"
                         "💡 *Navigation:*\n"
@@ -583,7 +620,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 return Response(content=raw_xml, media_type="application/xml")
             
             elif intent.get('action') == 'enroll':
-                # Handle enrollment (existing code)
+                # Handle enrollment
                 course_id = intent['course_id']
                 course_name = intent['course_name']
 
@@ -616,10 +653,12 @@ async def handle_moodle_login_flow(phone, raw_msg):
                         f"📊 *Course Overview:*\n"
                         f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
                         f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                        f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
                         "What would you like to access first?\n"
                         "1️⃣ Study Materials (PDFs)\n"
                         "2️⃣ Video Lessons\n"
-                        "3️⃣ Course Overview\n\n"
+                        "3️⃣ Take Quizzes\n"
+                        "4️⃣ Course Overview\n\n"
                         "💡 *Navigation:*\n"
                         "0️⃣ Main Menu • 9️⃣ Back to Courses • #️⃣ Exit"
                     )
@@ -653,7 +692,6 @@ async def handle_moodle_login_flow(phone, raw_msg):
     # ===== SAFETY NET =====
     return None
 
-
 def is_enrolled_live(phone, course_id):
     if phone not in user_moodle_data:
         return False
@@ -679,12 +717,61 @@ def main_menu_text():
         "0️⃣ Main Menu • #️⃣ Exit"
     )
 
+
+def create_quiz_response(course_data, base_url: str = "https://5450-41-75-182-30.ngrok-free.app"):
+    """Create response showing all quizzes with clickable links for each module"""
+    
+    # Get quizzes from the course data
+    quizzes_by_module = {}
+    module_order = []
+    
+    # Organize quizzes by section/module
+    if 'sections' in course_data:
+        for section in course_data['sections']:
+            section_name = section.get('name', 'Unknown Module')
+            if 'quizzes' in section and section['quizzes']:
+                if section_name not in quizzes_by_module:
+                    quizzes_by_module[section_name] = []
+                    module_order.append(section_name)
+                quizzes_by_module[section_name].extend(section['quizzes'])
+    
+    # Count total quizzes
+    total_quizzes = sum(len(quizzes) for quizzes in quizzes_by_module.values())
+    
+    if total_quizzes == 0:
+        response_text = f"📝 *{course_data['name']} - Quizzes*\n\n❌ No quizzes available for this course yet.\n\n💡 *Navigation:*\n0️⃣ Main Menu • 9️⃣ Back to Course • #️⃣ Exit"
+        escaped_text = escape_xml(response_text)
+        return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+    
+    # Build ONE comprehensive message with everything in the correct order
+    full_message = f"📝 *{course_data['name']} - Available Quizzes* ({total_quizzes} total)\n\n"
+    full_message += "💡 Tap any quiz link below to open it in your browser and start the assessment.\n\n"
+    
+    # Add each module and its quizzes
+    for module_name in module_order:
+        quizzes = quizzes_by_module[module_name]
+        if quizzes:
+            full_message += f"📌 *{module_name}*\n\n"
+            
+            for i, quiz in enumerate(quizzes, 1):
+                quiz_title = quiz.get('title', f'Quiz {i}')
+                quiz_url = quiz.get('url', '')
+                full_message += f"{i}. {quiz_title}\n🔗 {quiz_url}\n\n"
+    
+    # Add navigation at the end
+    full_message += "💡 *Navigation:*\n0️⃣ Main Menu • 9️⃣ Back to Course • #️⃣ Exit"
+    
+    # Send as ONE single message
+    escaped_text = escape_xml(full_message)
+    raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+    return raw_xml
+
 @router.post("/")  
 async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     raw_msg = Body.strip()
     user_msg = raw_msg.lower()
     phone = From
-    base_url = "https://2b76-41-75-184-245.ngrok-free.app" 
+    base_url = "https://fd9e-41-75-172-172.ngrok-free.app" 
     
     # ====== CHECK FOR MOODLE LOGIN FLOW FIRST ======
     if user_state.get(phone, "") in ["moodle_username", "moodle_password"]:
@@ -778,16 +865,50 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 )
 
         elif user_msg in ["3", "quiz"]:
-            user_state[phone] = "quiz_selection"
-            response_text = (
-                "📝 *Quiz Center*\n\n"
-                "Available quizzes:\n"
-                "1. Infection Prevention Basics\n"
-                "2. Safety Procedures\n"
-                "3. Emergency Protocols\n\n"
-                "0️⃣ Main Menu • #️⃣ Exit\n\n"
-                "Select a quiz number to start:"
-            )
+            # Check if user is logged into Moodle
+            if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
+                # User is logged in - show their enrolled courses
+                token = user_moodle_data[phone]['token']
+                userid = user_moodle_data[phone]['userid']
+                
+                enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                
+                if not enrolled_courses:
+                    response_text = (
+                        "📝 *Take a Quiz*\n\n"
+                        "You are not enrolled in any courses yet.\n\n"
+                        "💡 Browse courses (option 1) to enroll in new courses.\n\n"
+                        "0️⃣ Main Menu • #️⃣ Exit"
+                    )
+                    user_state[phone] = "main_menu"
+                else:
+                    # Store enrolled courses for later use
+                    user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
+                    
+                    # Build course list
+                    course_list = "\n".join([f"{i+1}. {course['name']}" for i, course in enumerate(enrolled_courses)])
+                    response_text = (
+                        "📝 *Select a Course for Quiz*\n\n"
+                        f"{course_list}\n\n"
+                        "0️⃣ Main Menu • #️⃣ Exit\n\n"
+                        "Select a course number to view its quizzes:"
+                    )
+                    user_state[phone] = "quiz_course_selection"
+            else:
+                # User not logged in - prompt for login
+                if phone not in user_moodle_data:
+                    user_moodle_data[phone] = {}
+                
+                user_moodle_data[phone]['original_intent'] = {
+                    'action': 'take_quiz'
+                }
+                
+                user_state[phone] = "moodle_username"
+                response_text = (
+                    "🔐 *Login Required*\n\n"
+                    "To take quizzes, you need to login to Moodle first.\n\n"
+                    "Please enter your username:"
+                )
             
         elif user_msg in ["4", "results"]:
             user_state[phone] = "view_results"
@@ -895,10 +1016,12 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                             f"📊 *Course Overview:*\n"
                             f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
                             f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                            f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
                             "What would you like to access?\n"
                             "1️⃣ Study Materials (PDFs)\n"
                             "2️⃣ Video Lessons\n"
-                            "3️⃣ Course Overview\n\n"
+                            "3️⃣ Take Quizzes\n"
+                            "4️⃣ Course Overview\n\n"
                             "💡 *Navigation:*\n"
                             "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
                         )
@@ -915,6 +1038,63 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                     )
             else:
                 response_text = "Please login first to access your courses."
+                user_state[phone] = "main_menu"
+        
+        escaped_text = escape_xml(response_text)
+        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+        return Response(content=raw_xml, media_type="application/xml")
+    
+    # ====== QUIZ COURSE SELECTION HANDLER ======
+    if user_state[phone] == "quiz_course_selection":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            response_text = (
+                "👋 Welcome back to MoH E-Learning Assistant!\n\n"
+                "📚 *Available Actions:*\n"
+                "1️⃣ Browse Courses\n"
+                "2️⃣ My Enrolled Courses\n"
+                "3️⃣ Take a Quiz\n"
+                "4️⃣ View Quiz Results\n"
+                "5️⃣ Ask Trainer for Help\n"
+                "6️⃣ Ask Question Q&A\n\n"
+                "0️⃣ Main Menu • #️⃣ Exit"
+            )
+        elif user_msg in ["#", "exit"]:
+            response_text = "👋 Thank you for using MoH E-Learning Assistant!"
+            user_state.pop(phone, None)
+        else:
+            # Get user's enrolled courses
+            if phone in user_moodle_data and 'enrolled_courses' in user_moodle_data[phone]:
+                enrolled_courses = user_moodle_data[phone]['enrolled_courses']
+                
+                if user_msg.isdigit() and 1 <= int(user_msg) <= len(enrolled_courses):
+                    selected_course = enrolled_courses[int(user_msg)-1]
+                    course_id = selected_course['id']
+                    
+                    # Get course details with quizzes
+                    all_courses = get_available_courses()
+                    course_data = all_courses.get(str(course_id), {})
+                    
+                    if course_data and course_data.get('quizzes') and len(course_data['quizzes']) > 0:
+                        # Show the quiz response directly
+                        raw_xml = create_quiz_response(course_data, base_url)
+                        return Response(content=raw_xml, media_type="application/xml")
+                    else:
+                        response_text = (
+                            f"📝 *{selected_course['name']}*\n\n"
+                            "❌ No quizzes available for this course yet.\n\n"
+                            "💡 *Navigation:*\n"
+                            "0️⃣ Main Menu • 9️⃣ Back to Course Selection • #️⃣ Exit"
+                        )
+                        # Keep user in quiz_course_selection state to select another course
+                else:
+                    response_text = (
+                        "Invalid course number.\n\n"
+                        "Please select a valid course number.\n\n"
+                        "0️⃣ Main Menu • #️⃣ Exit"
+                    )
+            else:
+                response_text = "Session expired. Please start again."
                 user_state[phone] = "main_menu"
         
         escaped_text = escape_xml(response_text)
@@ -968,10 +1148,12 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                             f"📊 *Course Overview:*\n"
                             f"• {len(selected_course.get('pdfs', []))} PDFs\n"
                             f"• {len(selected_course.get('videos', []))} Videos\n\n"
+                            f"• {len(selected_course.get('quizzes', []))} quizzes\n\n"
                             "What would you like to access?\n"
                             "1️⃣ Study Materials (PDFs)\n"
                             "2️⃣ Video Lessons\n"
-                            "3️⃣ Course Overview\n\n"
+                            "3️⃣ Take Quizzes\n"
+                            "4️⃣ Course Overview\n\n"
                             "💡 *Navigation:*\n"
                             "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
                         )
@@ -982,6 +1164,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                             f"📊 *Course Overview:*\n"
                             f"• {len(selected_course.get('pdfs', []))} PDFs\n"
                             f"• {len(selected_course.get('videos', []))} Videos\n\n"
+                            f"• {len(selected_course.get('quizzes', []))} quizzes\n\n"
                             "🔒 *You are NOT enrolled in this course*\n\n"
                             "1️⃣ Enroll in this Course\n\n"
                             "💡 *Navigation:*\n"
@@ -997,115 +1180,8 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
         escaped_text = escape_xml(response_text)
         raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
         return Response(content=raw_xml, media_type="application/xml")
-
-
-    # # ====== ENROLLED COURSE ACTIONS ======
-    # for course_id, course_data in get_available_courses().items():
-    #     if user_state[phone] == f"enrolled_{course_id}":
-
-    #         # ====== CHECK IF THIS IS A MOODLE-ENROLLED COURSE ======
-    #         is_moodle_enrolled = (
-    #             phone in user_moodle_data and 
-    #             'token' in user_moodle_data[phone] and
-    #             any(course['id'] == int(course_id) for course in user_moodle_data[phone].get('enrolled_courses', []))
-    #         )
-            
-    #         if user_msg == "1":
-    #             if is_moodle_enrolled:
-    #                 # Get Moodle course contents
-    #                 token = user_moodle_data[phone]['token']
-    #                 contents = get_course_contents_moodle(token, int(course_id))
-    #                 resources = extract_moodle_resources(contents, token)
-    #                 pdfs = resources.get('pdfs', [])
-    #                 course_name = course_data["name"]
-                    
-    #                 if pdfs:
-    #                     raw_xml = create_moodle_pdf_response(pdfs, course_name)
-    #                     return Response(content=raw_xml, media_type="application/xml")
-    #                 else:
-    #                     response_text = "No PDFs available for this Moodle course."
-    #             else:
-    #                 # Use existing PDF system
-    #                 pdfs = course_data["pdfs"]
-    #                 course_name = course_data["name"]
-    #                 raw_xml = create_pdf_download_response(pdfs, course_name, base_url)
-    #                 return Response(content=raw_xml, media_type="application/xml")
-                
-    #         elif user_msg == "2":
-    #             if is_moodle_enrolled:
-    #                 # Get Moodle course contents
-    #                 token = user_moodle_data[phone]['token']
-    #                 contents = get_course_contents_moodle(token, int(course_id))
-    #                 resources = extract_moodle_resources(contents, token)
-    #                 videos = resources.get('videos', [])
-    #                 course_name = course_data["name"]
-                    
-    #                 if videos:
-    #                     response_text = (
-    #                         f"🎥 *{course_name} - Videos*\n\n"
-    #                         f"Found {len(videos)} video(s).\n\n"
-    #                         f"Would you like to:\n"
-    #                         f"1️⃣ Get direct links to videos\n"
-    #                         f"2️⃣ Download and send videos\n\n"
-    #                         f"9️⃣ Back • 0️⃣ Main Menu"
-    #                     )
-    #                     user_state[phone] = f"moodle_videos_{course_id}"
-    #                 else:
-    #                     response_text = "No videos available for this Moodle course."
-    #             else:
-    #                 # Use existing video system
-    #                 video_urls = course_data["videos"]
-    #                 course_name = course_data["name"] 
-    #                 raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, base_url)
-    #                 return Response(content=raw_xml, media_type="application/xml")
-                
-    #         elif user_msg == "3":
-    #             response_text = (
-    #                 f"📋 *{course_data['name']} - Course Overview*\n\n"
-    #                 f"This course contains:\n"
-    #                 f"• {len(course_data['pdfs'])} PDF study materials\n"
-    #                 f"• {len(course_data['videos'])} video lessons\n\n"
-    #                 "Access your materials:\n"
-    #                 "1️⃣ Study Materials (PDFs)\n"
-    #                 "2️⃣ Video Lessons\n\n"
-    #                 "💡 *Navigation:*\n"
-    #                 "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
-    #             )
-                
-    #         elif user_msg == "9":
-    #             user_state[phone] = "my_courses"
-    #             response_text = "↩️ Returning to your enrolled courses..."
-                
-    #         elif user_msg in ["0", "menu"]:
-    #             user_state[phone] = "main_menu"
-    #             response_text = (
-    #                 "👋 Welcome back to MoH E-Learning Assistant!\n\n"
-    #                 "📚 *Available Actions:*\n"
-    #                 "1️⃣ Browse Courses\n"
-    #                 "2️⃣ My Enrolled Courses\n"
-    #                 "3️⃣ Take a Quiz\n"
-    #                 "4️⃣ View Quiz Results\n"
-    #                 "5️⃣ Ask Trainer for Help\n"
-    #                 "6️⃣ Ask Question Q&A\n\n"
-    #                 "0️⃣ Main Menu • #️⃣ Exit"
-    #             )
-                
-    #         elif user_msg == "#":
-    #             response_text = "👋 Thank you for using MoH E-Learning Assistant!"
-    #             user_state.pop(phone, None)
-                
-    #         else:
-    #             response_text = (
-    #                 "Please select 1, 2, or 3.\n\n"
-    #                 "💡 *Navigation:*\n"
-    #                 "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
-    #             )
-            
-    #         escaped_text = escape_xml(response_text)
-    #         raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-    #         return Response(content=raw_xml, media_type="application/xml")
-
-        # ====== ENROLLED COURSE ACTIONS ======
+    
+    # ====== ENROLLED COURSE ACTIONS ======
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"enrolled_{course_id}":
             # 🎯 FIXED: Check if user is logged in
@@ -1119,7 +1195,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             token = user_moodle_data[phone]['token']
             
             if user_msg == "1":
-                # Get Moodle course contents
+                # Study Materials (PDFs)
                 contents = get_course_contents_moodle(token, int(course_id))
                 resources = extract_moodle_resources(contents, token)
                 pdfs = resources.get('pdfs', [])
@@ -1132,7 +1208,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                     response_text = "No PDFs available for this course."
                     
             elif user_msg == "2":
-                # Get Moodle course contents for videos
+                # Video Lessons
                 contents = get_course_contents_moodle(token, int(course_id))
                 resources = extract_moodle_resources(contents, token)
                 videos = resources.get('videos', [])
@@ -1152,14 +1228,29 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                     response_text = "No videos available for this course."
                     
             elif user_msg == "3":
+                # Take Quizzes - THIS IS THE CORRECT HANDLER
+                print(f"📝 User requested quizzes for course: {course_data['name']}")
+                print(f"   Found {len(course_data.get('quizzes', []))} quizzes")
+                
+                # Check if there are quizzes
+                if course_data.get('quizzes') and len(course_data['quizzes']) > 0:
+                    raw_xml = create_quiz_response(course_data, base_url)
+                    return Response(content=raw_xml, media_type="application/xml")
+                else:
+                    response_text = "No quizzes available for this course yet."
+                    
+            elif user_msg == "4":
+                # Course Overview
                 response_text = (
                     f"📋 *{course_data['name']} - Course Overview*\n\n"
                     f"This course contains:\n"
-                    f"• {len(course_data['pdfs'])} PDF study materials\n"
-                    f"• {len(course_data['videos'])} video lessons\n\n"
+                    f"• {len(course_data.get('pdfs', []))} PDF study materials\n"
+                    f"• {len(course_data.get('videos', []))} video lessons\n"
+                    f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
                     "Access your materials:\n"
                     "1️⃣ Study Materials (PDFs)\n"
-                    "2️⃣ Video Lessons\n\n"
+                    "2️⃣ Video Lessons\n"
+                    "3️⃣ Take Quizzes\n\n"
                     "💡 *Navigation:*\n"
                     "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
                 )
@@ -1192,7 +1283,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 
             else:
                 response_text = (
-                    "Please select 1, 2, or 3.\n\n"
+                    "Please select 1, 2, 3, or 4.\n\n"
                     "💡 *Navigation:*\n"
                     "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
                 )
@@ -1268,7 +1359,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     # ====== BROWSING SPECIFIC COURSE HANDLER ======
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"browsing_{course_id}":
-            base_url = "https://2b76-41-75-184-245.ngrok-free.app"
+            base_url = "https://fd9e-41-75-172-172.ngrok-free.app"
                 
             if user_msg == "1":
                 # Check if user is logged into Moodle
@@ -1297,12 +1388,14 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                             f"📊 *Course Overview:*\n"
                             f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
                             f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                            f"• {len(selected_course.get('quizzes', []))} quizzes\n\n" 
                             "What would you like to access?\n"
                             "1️⃣ Study Materials (PDFs)\n"
                             "2️⃣ Video Lessons\n"
-                            "3️⃣ Course Overview\n\n"
+                            "3️⃣ Take Quizzes\n"  # ← NEED TO ADD THIS LINE
+                            "4️⃣ Course Overview\n\n"
                             "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
+                            "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
                         )
                     else:
                         # Try to enroll
@@ -1335,10 +1428,12 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                                         f"📊 *Course Overview:*\n"
                                         f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
                                         f"• {len(course_data.get('videos', []))} Video Resources\n\n"
-                                        "What would you like to access first?\n"
+                                        f"• {len(selected_course.get('quizzes', []))} quizzes\n\n"
+                                       "What would you like to access?\n"
                                         "1️⃣ Study Materials (PDFs)\n"
                                         "2️⃣ Video Lessons\n"
-                                        "3️⃣ Course Overview\n\n"
+                                        "3️⃣ Take Quizzes\n"
+                                        "4️⃣ Course Overview\n\n"
                                         "💡 *Navigation:*\n"
                                         "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
                                     )
@@ -1445,6 +1540,7 @@ async def whatsapp_info():
             "serve-video": "/whatsapp/serve-video"
         }
     }
+
 
 # Startup optimization
 @router.on_event("startup")
