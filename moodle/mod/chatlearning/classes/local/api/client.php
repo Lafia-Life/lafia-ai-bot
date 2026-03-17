@@ -188,7 +188,7 @@ class client {
     private function build_context_params(stdClass $context): array {
         $params = [
             'moodle_course_id' => $context->courseid,
-            'moodle_cmid' => $context->cmid,
+            'moodle_cmid' => (string)$context->cmid,
             'moodle_user_id' => $context->userid,
             'moodle_username' => $context->username,
             'moodle_fullname' => $context->fullname,

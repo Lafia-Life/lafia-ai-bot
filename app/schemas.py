@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 from enum import Enum
 
 
@@ -113,6 +113,14 @@ class ChatRequest(BaseModel):
     include_global_docs: bool = False
     document_scope: Optional[str] = None
     moodle_cmid: Optional[str] = None
+
+    @field_validator("moodle_cmid", mode="before")
+    @classmethod
+    def normalize_moodle_cmid(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
 
 class Citation(BaseModel):
