@@ -609,15 +609,29 @@ def create_video_links_response(videos, course_name, note: str = "", phone: str 
     total_with_urls = sum(1 for item in videos if (item or {}).get("url"))
     if total_with_urls > sent:
         remaining = total_with_urls - sent
+        remaining_text = (
+            localize(phone, f"... and {remaining} more video link(s).", f"... era waliwo enkolagana za vidiyo endala {remaining}.")
+            if phone
+            else f"... and {remaining} more video link(s)."
+        )
         messages_xml.append(
             f'''<Message>
-            <Body>{escape_xml(localize(phone, f"... and {remaining} more video link(s).", f"... era waliwo enkolagana za vidiyo endala {remaining}.") if phone else f"... and {remaining} more video link(s).")}</Body>
+            <Body>{escape_xml(remaining_text)}</Body>
         </Message>'''
         )
 
+    open_link_text = (
+        localize(
+            phone,
+            "💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu",
+            "💡 Ggulawo enkolagana yonna mu browser yo.\n\nNavigation:\n9️⃣ Ddayo • 0️⃣ Main Menu",
+        )
+        if phone
+        else "💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu"
+    )
     messages_xml.append(
         f'''<Message>
-        <Body>{escape_xml(localize(phone, "💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu", "💡 Ggulawo enkolagana yonna mu browser yo.\n\nNavigation:\n9️⃣ Ddayo • 0️⃣ Main Menu") if phone else "💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu")}</Body>
+        <Body>{escape_xml(open_link_text)}</Body>
     </Message>'''
     )
 
