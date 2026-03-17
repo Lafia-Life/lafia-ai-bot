@@ -98,7 +98,7 @@ def localize(phone: str, english: str, luganda: str) -> str:
     return luganda if get_session_language(phone) == "lg" else english
 
 
-def language_selection_text(invalid: bool = False) -> str:
+def language_selection_text(invalid: bool = False, change_mode: bool = False) -> str:
     if invalid:
         intro = (
             "Please reply with 1 for English or 2 for Luganda.\n\n"
@@ -106,6 +106,11 @@ def language_selection_text(invalid: bool = False) -> str:
         )
     else:
         intro = ""
+    if change_mode:
+        intro += (
+            "Change language for this session:\n"
+            "Kyusa olulimi lwa session eno:\n\n"
+        )
     return (
         f"{intro}"
         "Welcome to MoH E-Learning Assistant!\n"
@@ -114,6 +119,7 @@ def language_selection_text(invalid: bool = False) -> str:
         "Londa olulimi lw'oyagala okukozesa mu session eno:\n\n"
         "1️⃣ English\n"
         "2️⃣ Luganda"
+        + ("\n0️⃣ Main Menu" if change_mode else "")
     )
 
 
@@ -1084,7 +1090,8 @@ def main_menu_text(phone: str, first_time: bool = False):
             "3️⃣ Take a Quiz\n"
             "4️⃣ View Quiz Results\n"
             "5️⃣ Ask Trainer for Help\n"
-            "6️⃣ Ask Question Q&A\n\n"
+            "6️⃣ Ask Question Q&A\n"
+            "7️⃣ Change Language\n\n"
             "0️⃣ Main Menu • #️⃣ Exit",
             "👋 Ki bulungi! Tukwaniriza ku MoH E-Learning Assistant!\n\n"
             "📚 *Ebikolebwa Eriwo:*\n"
@@ -1093,7 +1100,8 @@ def main_menu_text(phone: str, first_time: bool = False):
             "3️⃣ Kola Ekigezo\n"
             "4️⃣ Laba Ebivudde mu Kigezo\n"
             "5️⃣ Saba Omusomesa Obuyambi\n"
-            "6️⃣ Buuza Ekibuuzo\n\n"
+            "6️⃣ Buuza Ekibuuzo\n"
+            "7️⃣ Kyusa Olulimi\n\n"
             "0️⃣ Main Menu • #️⃣ Mala"
         )
 
@@ -1106,7 +1114,8 @@ def main_menu_text(phone: str, first_time: bool = False):
         "3️⃣ Take a Quiz\n"
         "4️⃣ View Quiz Results\n"
         "5️⃣ Ask Trainer for Help\n"
-        "6️⃣ Ask Question Q&A\n\n"
+        "6️⃣ Ask Question Q&A\n"
+        "7️⃣ Change Language\n\n"
         "0️⃣ Main Menu • #️⃣ Exit",
         "👋 Tukwaniriza nate ku MoH E-Learning Assistant!\n\n"
         "📚 *Ebikolebwa Eriwo:*\n"
@@ -1115,7 +1124,8 @@ def main_menu_text(phone: str, first_time: bool = False):
         "3️⃣ Kola Ekigezo\n"
         "4️⃣ Laba Ebivudde mu Kigezo\n"
         "5️⃣ Saba Omusomesa Obuyambi\n"
-        "6️⃣ Buuza Ekibuuzo\n\n"
+        "6️⃣ Buuza Ekibuuzo\n"
+        "7️⃣ Kyusa Olulimi\n\n"
         "0️⃣ Main Menu • #️⃣ Mala"
     )
 
@@ -1136,20 +1146,41 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
         return twiml_message(language_selection_text())
 
     # ====== LANGUAGE SELECTION ======
-    if user_state.get(phone) == "language_selection":
+    if user_state.get(phone) in {"language_selection", "language_selection_menu"}:
+        change_mode = user_state.get(phone) == "language_selection_menu"
+        first_time = not change_mode
         if user_msg in {"1", "english", "en"}:
             set_session_language(phone, "en")
             user_state[phone] = "main_menu"
-            return twiml_message(main_menu_text(phone, first_time=True))
+            if change_mode:
+                return twiml_message(
+                    localize(
+                        phone,
+                        "✅ Language changed to English.\n\n",
+                        "✅ Olulimi lukyusiddwa ne lufuuka Lungereza.\n\n"
+                    ) + main_menu_text(phone)
+                )
+            return twiml_message(main_menu_text(phone, first_time=first_time))
         if user_msg in {"2", "luganda", "lg"}:
             set_session_language(phone, "lg")
             user_state[phone] = "main_menu"
-            return twiml_message(main_menu_text(phone, first_time=True))
+            if change_mode:
+                return twiml_message(
+                    localize(
+                        phone,
+                        "✅ Language changed to Luganda.\n\n",
+                        "✅ Olulimi lukyusiddwa ne lufuuka Luganda.\n\n"
+                    ) + main_menu_text(phone)
+                )
+            return twiml_message(main_menu_text(phone, first_time=first_time))
+        if change_mode and user_msg in {"0", "menu", "main menu"}:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text(phone))
         if user_msg in {"#", "exit", "quit"}:
             user_state.pop(phone, None)
             clear_session_language(phone)
             return twiml_message(goodbye_text(phone))
-        return twiml_message(language_selection_text(invalid=True))
+        return twiml_message(language_selection_text(invalid=True, change_mode=change_mode))
 
     # ====== CHECK FOR MOODLE LOGIN FLOW FIRST ======
     if user_state.get(phone, "") in ["moodle_username", "moodle_password"]:
@@ -1352,6 +1383,10 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 )
                 
                 response_text = materials_list
+
+        elif user_msg in ["7", "language", "lang", "olulimi"]:
+            user_state[phone] = "language_selection_menu"
+            response_text = language_selection_text(change_mode=True)
             
         elif user_msg in ["#", "exit", "quit"]:
             response_text = goodbye_text(phone)
@@ -1361,9 +1396,9 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             response_text = localize(
                 phone,
                 "Invalid option. Please reply with:\n"
-                "1️⃣-6️⃣ for actions or 0️⃣ for main menu",
+                "1️⃣-7️⃣ for actions or 0️⃣ for main menu",
                 "Olonze bubi. Ddamu nga okozesa:\n"
-                "1️⃣-6️⃣ okukola ebikolebwa oba 0️⃣ okudda ku main menu"
+                "1️⃣-7️⃣ okukola ebikolebwa oba 0️⃣ okudda ku main menu"
             )
         
         return twiml_message(response_text)
