@@ -198,6 +198,7 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         const list = Array.isArray(documents) ? documents : [];
         const includeGlobal = !!config.includeGlobalDocs;
         const scope = String(config.documentScope || '').trim().toLowerCase();
+        const activityCmid = String(config.cmid || '').trim();
         const hasScopedFilter = scope === 'currentcourse' || scope === 'enrolledcourses';
 
         const allowed = Array.isArray(config.allowedCourseIds)
@@ -206,6 +207,13 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         const allowedSet = new Set(allowed);
 
         return list.filter(function(doc) {
+            var docCmid = doc && doc.moodle_cmid !== undefined && doc.moodle_cmid !== null
+                ? String(doc.moodle_cmid).trim()
+                : '';
+            if (scope === 'currentcourse' && activityCmid) {
+                return docCmid !== '' && docCmid === activityCmid;
+            }
+
             var docCourseId = doc && doc.course_id !== undefined && doc.course_id !== null
                 ? String(doc.course_id).trim()
                 : '';
@@ -286,11 +294,11 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         elements.chatLog.scrollTop = elements.chatLog.scrollHeight;
     }
 
-    function fetchDocuments() {
+    function fetchDocuments(successMessage) {
         if (!elements.documentList) {
-            return;
+            return Promise.resolve();
         }
-        Ajax.call([
+        return Ajax.call([
             {
                 methodname: 'mod_chatlearning_get_documents',
                 args: {cmid: Number(config.cmid)},
@@ -299,8 +307,31 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
             .then(function(docs) {
                 state.documents = scopeDocumentsForDisplay(docs || []);
                 renderDocuments(state.documents);
+                if (successMessage) {
+                    setStatus(elements.documentStatus, successMessage);
+                }
             })
-            .catch(Notification.exception);
+            .catch(function(err) {
+                Notification.exception(err);
+                if (elements.documentStatus) {
+                    var message = err && err.message ? err.message : 'Unable to load documents.';
+                    setStatus(elements.documentStatus, message, '#dc2626');
+                }
+            });
+    }
+
+    function handleDocumentSync(event) {
+        event.preventDefault();
+        const trigger = elements.documentSync;
+        if (trigger) {
+            trigger.disabled = true;
+        }
+        syncMoodleDocuments(elements.documentStatus)
+            .finally(function() {
+                if (trigger) {
+                    trigger.disabled = false;
+                }
+            });
     }
 
     function handleDeleteDocument(document) {
@@ -400,21 +431,18 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
             });
     }
 
-    function handleMoodleSync(event) {
-        event.preventDefault();
-
-        const status = elements.syncStatus;
+    function syncMoodleDocuments(status) {
         const includePdf = !!(elements.syncPdf && elements.syncPdf.checked);
         const includeScorm = !!(elements.syncScorm && elements.syncScorm.checked);
 
         if (!includePdf && !includeScorm) {
             setStatus(status, 'Select at least one source type.', '#dc2626');
-            return;
+            return Promise.resolve();
         }
 
         setStatus(status, strings.syncing || 'Syncing Moodle files...');
 
-        Ajax.call([
+        return Ajax.call([
             {
                 methodname: 'mod_chatlearning_sync_moodle_documents',
                 args: {
@@ -437,6 +465,11 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
             .catch(function(err) {
                 setStatus(status, err && err.message ? err.message : 'Moodle sync failed', '#dc2626');
             });
+    }
+
+    function handleMoodleSync(event) {
+        event.preventDefault();
+        syncMoodleDocuments(elements.syncStatus);
     }
 
     function handleChat(event) {
@@ -500,6 +533,9 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
         if (elements.chatForm) {
             elements.chatForm.addEventListener('submit', handleChat);
         }
+        if (elements.documentSync) {
+            elements.documentSync.addEventListener('click', handleDocumentSync);
+        }
         if (elements.chatInput) {
             elements.chatInput.addEventListener('keydown', function(event) {
                 if (event.key === 'Enter' && !event.shiftKey) {
@@ -534,6 +570,7 @@ define(['core/ajax', 'core/notification', 'core/str'], function(Ajax, Notificati
 
         elements.documentList = elements.root.querySelector('[data-document-list]');
         elements.documentStatus = elements.root.querySelector('[data-document-status]');
+        elements.documentSync = elements.root.querySelector('[data-document-sync]');
         elements.uploadForm = elements.root.querySelector('[data-upload-form]');
         elements.uploadInput = elements.root.querySelector('[data-upload-input]');
         elements.uploadStatus = elements.root.querySelector('[data-upload-status]');

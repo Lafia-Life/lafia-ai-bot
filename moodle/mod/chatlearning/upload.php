@@ -50,6 +50,8 @@ try {
     $payload->contextprompt = $instance->contextprompt ?? '';
     $payload->allowuploads = (bool)($instance->allowuploads ?? 0);
     $payload->allowedmimetypes = $instance->allowedmimetypes ?? '';
+    $payload->documentscope = $instance->documentscope ?? 'enrolledcourses';
+    $payload->includeglobaldocs = !empty($instance->allowglobaldocs);
 
     $client = new mod_chatlearning\local\api\client();
     $responsePayload = $client->upload_document($payload, $file);

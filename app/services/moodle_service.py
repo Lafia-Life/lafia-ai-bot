@@ -24,6 +24,7 @@ _preload_thread = None
 _preload_thread_lock = threading.Lock()
 _invalid_token_warning_printed = False
 _missing_config_warning_printed = False
+_last_course_sync_error = None
 URL_PATTERN = re.compile(r'https?://[^\s<>"\']+')
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv", ".3gp")
 VIDEO_HOST_HINTS = ("youtube.com", "youtu.be", "vimeo.com", "dailymotion.com", "wistia.")
@@ -189,11 +190,38 @@ def _collect_section_embedded_resources(section: dict, token: str | None, course
     }
     return _collect_module_resources(pseudo_module, token, course_id)
 
+
+def _set_last_course_sync_error(code: str, message: str):
+    global _last_course_sync_error
+    with cache_lock:
+        _last_course_sync_error = {
+            "code": code,
+            "message": message,
+            "timestamp": time.time(),
+        }
+
+
+def _clear_last_course_sync_error():
+    global _last_course_sync_error
+    with cache_lock:
+        _last_course_sync_error = None
+
+
+def get_last_course_sync_error():
+    with cache_lock:
+        if not _last_course_sync_error:
+            return None
+        return _last_course_sync_error.copy()
+
 def get_moodle_courses():
     """Fetch courses from Moodle API"""
     global _invalid_token_warning_printed, _missing_config_warning_printed
 
     if not MOODLE_BASE_URL or not MOODLE_TOKEN:
+        _set_last_course_sync_error(
+            "missing_config",
+            "Moodle preload skipped: set MOODLE_BASE_URL and MOODLE_TOKEN.",
+        )
         if not _missing_config_warning_printed:
             print("⚠️ Moodle preload skipped: set MOODLE_BASE_URL and MOODLE_TOKEN.")
             _missing_config_warning_printed = True
@@ -213,15 +241,23 @@ def get_moodle_courses():
         
         if isinstance(courses, dict) and courses.get('exception'):
             message = courses.get('message', 'Unknown error')
+            errorcode = str(courses.get('errorcode', '')).lower()
+            lowered_message = str(message).lower()
             if "invalid token" in str(message).lower():
+                _set_last_course_sync_error("invalid_token", message)
                 if not _invalid_token_warning_printed:
                     print("⚠️ Moodle API token is invalid. Update MOODLE_TOKEN and restart the app container.")
                     _invalid_token_warning_printed = True
+            elif errorcode == "accessexception" or "access control" in lowered_message:
+                _set_last_course_sync_error("access_exception", message)
+                print("⚠️ Moodle API token was accepted but cannot access course APIs. Update the token/service permissions and restart the app.")
             else:
+                _set_last_course_sync_error("api_error", message)
                 print(f"Moodle API error: {message}")
             return {}
 
         _invalid_token_warning_printed = False
+        _clear_last_course_sync_error()
         
         courses_dict = {}
         for course in courses:
@@ -237,12 +273,15 @@ def get_moodle_courses():
         return courses_dict  
     
     except requests.exceptions.RequestException as e:
+        _set_last_course_sync_error("network_error", str(e))
         print(f"❌ Network error fetching Moodle courses: {e}")
         return {}
     except ValueError as e:
+        _set_last_course_sync_error("json_error", str(e))
         print(f"❌ JSON parsing error from Moodle API: {e}")
         return {}
     except Exception as e:
+        _set_last_course_sync_error("unexpected_error", str(e))
         print(f"❌ Unexpected error fetching Moodle courses: {e}")
         return {}
 

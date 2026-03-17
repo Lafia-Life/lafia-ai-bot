@@ -37,6 +37,7 @@ from app.services.moodle_service import (
     enroll_user_in_course,
     get_moodle_user_id,
     is_user_enrolled_in_course,
+    get_last_course_sync_error,
 )
 from urllib.parse import quote, unquote, urlparse
 import urllib3
@@ -54,6 +55,7 @@ courses_store = CourseStore(Path("storage/data"))
 document_path_cache = {}
 courses_cache = {}
 user_moodle_data = {} 
+user_language = {}
 courses_cache_timestamp = 0
 CACHE_DURATION = 300  # 5 minutes
 
@@ -78,6 +80,130 @@ def twiml_message(text: str = "") -> Response:
     else:
         raw_xml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
     return Response(content=raw_xml, media_type="application/xml")
+
+
+def get_session_language(phone: str) -> str:
+    return user_language.get(phone, "en")
+
+
+def set_session_language(phone: str, language: str) -> None:
+    user_language[phone] = language if language in {"en", "lg"} else "en"
+
+
+def clear_session_language(phone: str) -> None:
+    user_language.pop(phone, None)
+
+
+def localize(phone: str, english: str, luganda: str) -> str:
+    return luganda if get_session_language(phone) == "lg" else english
+
+
+def language_selection_text(invalid: bool = False) -> str:
+    if invalid:
+        intro = (
+            "Please reply with 1 for English or 2 for Luganda.\n\n"
+            "Ddamu ne 1 ku Lungereza oba 2 ku Luganda.\n\n"
+        )
+    else:
+        intro = ""
+    return (
+        f"{intro}"
+        "Welcome to MoH E-Learning Assistant!\n"
+        "Tukwaniriza ku MoH E-Learning Assistant!\n\n"
+        "Choose your language for this session:\n"
+        "Londa olulimi lw'oyagala okukozesa mu session eno:\n\n"
+        "1️⃣ English\n"
+        "2️⃣ Luganda"
+    )
+
+
+def goodbye_text(phone: str) -> str:
+    return localize(
+        phone,
+        "👋 Thank you for using MoH E-Learning Assistant!",
+        "👋 Webale okukozesa MoH E-Learning Assistant!",
+    )
+
+
+def browse_courses_empty_text(phone: str) -> str:
+    error = get_last_course_sync_error()
+    if not error:
+        return localize(
+            phone,
+            "📚 *Browse Courses*\n\n"
+            "Currently no courses are available.\n\n"
+            "0️⃣ Main Menu • #️⃣ Exit",
+            "📚 *Laba Amasomo*\n\n"
+            "Mu kiseera kino tewali masomo galiwo.\n\n"
+            "0️⃣ Main Menu • #️⃣ Mala"
+        )
+
+    code = error.get("code")
+    if code == "missing_config":
+        detail = localize(
+            phone,
+            "Moodle integration is not configured on the WhatsApp server.",
+            "Okukwataganya Moodle tekutebeddwa ku seva ya WhatsApp."
+        )
+    elif code == "invalid_token":
+        detail = localize(
+            phone,
+            "The configured Moodle token is invalid.",
+            "Moodle token etebeddwa si ntuufu."
+        )
+    elif code == "access_exception":
+        detail = localize(
+            phone,
+            "Moodle denied access to the configured course catalog token.",
+            "Moodle egaanye token ekozesebwa okulaba olukalala lw'amasomo."
+        )
+    else:
+        detail = localize(
+            phone,
+            "The Moodle course catalog could not be loaded right now.",
+            "Olukalala lw'amasomo ku Moodle telusobodde kulabika kati."
+        )
+
+    return localize(
+        phone,
+        "📚 *Browse Courses*\n\n"
+        f"{detail}\n\n"
+        "This is a Moodle integration issue, not that your courses are missing.\n\n"
+        "Try option 2 to log in and view your enrolled courses, or contact the administrator.\n\n"
+        "0️⃣ Main Menu • #️⃣ Exit",
+        "📚 *Laba Amasomo*\n\n"
+        f"{detail}\n\n"
+        "Kino kizibu kya kukwataganya na Moodle, si kubanga amasomo go tebaliwo.\n\n"
+        "Gezaako option 2 okweyingiza olabe amasomo go, oba otuukirire omuddukanya.\n\n"
+        "0️⃣ Main Menu • #️⃣ Mala"
+    )
+
+
+def question_mode_empty_text(phone: str) -> str:
+    if get_last_course_sync_error():
+        return localize(
+            phone,
+            "🤖 *Document Q&A*\n\n"
+            "Course materials could not be loaded from Moodle right now.\n\n"
+            "Try again later or contact the administrator.\n\n"
+            "0️⃣ Main Menu • #️⃣ Exit",
+            "🤖 *Q&A ku Biyigirizibwa*\n\n"
+            "Ebikozesebwa by'amasomo tebifunye okuva ku Moodle kati.\n\n"
+            "Ddamu oluvannyuma oba otuukirire omuddukanya.\n\n"
+            "0️⃣ Main Menu • #️⃣ Mala"
+        )
+
+    return localize(
+        phone,
+        "🤖 *Document Q&A*\n\n"
+        "No course materials available yet.\n\n"
+        "Please upload documents first, then ask questions about them.\n\n"
+        "0️⃣ Main Menu • #️⃣ Exit",
+        "🤖 *Q&A ku Biyigirizibwa*\n\n"
+        "Tewali bikozesebwa by'amasomo biriwo kati.\n\n"
+        "Sooka oteeke ebiwandiiko, oluvannyuma obuuze ebibuuzo ku byo.\n\n"
+        "0️⃣ Main Menu • #️⃣ Mala"
+    )
 
 
 def normalize_phone_key(from_value: str) -> str:
@@ -142,7 +268,7 @@ def get_document_file_path(document_id: str):
         print(f"Error in get_document_file_path: {e}")
         return None, None
 
-def create_pdf_download_response(pdfs, course_name, base_url):
+def create_pdf_download_response(pdfs, course_name, base_url, phone: str | None = None):
     """Create PDF response - SHOW HEADER MESSAGE FIRST, then PDFs"""
     # Filter to only include PDFs that actually exist
     available_pdfs = []
@@ -155,7 +281,14 @@ def create_pdf_download_response(pdfs, course_name, base_url):
                 available_pdfs.append(pdf)
     
     if not available_pdfs:
-        response_text = "No PDFs available for this course (files not found)."
+        if phone:
+            response_text = localize(
+                phone,
+                "No PDFs available for this course (files not found).",
+                "Tewali PDF ku ssomo lino (fayiro tezirabiddwa)."
+            )
+        else:
+            response_text = "No PDFs available for this course (files not found)."
         escaped_text = escape_xml(response_text)
         return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
     
@@ -163,14 +296,32 @@ def create_pdf_download_response(pdfs, course_name, base_url):
     messages_xml = []
     
     # HEADER MESSAGE - This is what you want to show first
+    header_text = (
+        localize(
+            phone,
+            f"📚 {course_name} - Available PDFs ({len(available_pdfs)})",
+            f"📚 {course_name} - PDF Eziriwo ({len(available_pdfs)})",
+        )
+        if phone
+        else f"📚 {course_name} - Available PDFs ({len(available_pdfs)})"
+    )
     header_message = f'''<Message>
-        <Body>📚 {escape_xml(course_name)} - Available PDFs ({len(available_pdfs)})</Body>
+        <Body>{escape_xml(header_text)}</Body>
     </Message>'''
     messages_xml.append(header_message)
     
     # NAVIGATION INSTRUCTIONS - Show this right after header
+    nav_text = (
+        localize(
+            phone,
+            "💡 Tap any PDF to view it. Use download icon to save.\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit",
+            "💡 Nyiga ku PDF yonna okugilaba. Kozesa akabonero ka download okugikuuma.\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Ddayo ku Ssomo • 00️⃣ Mala",
+        )
+        if phone
+        else "💡 Tap any PDF to view it. Use download icon to save.\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit"
+    )
     nav_message = f'''<Message>
-        <Body>💡 Tap any PDF to view it. Use download icon to save.\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit</Body>
+        <Body>{escape_xml(nav_text)}</Body>
     </Message>'''
     messages_xml.append(nav_message)
     
@@ -274,19 +425,35 @@ def serve_video(filename: str):
         }
     )
 
-def create_smart_video_response(video_urls, course_name, course_id, token, base_url: str = "https://elearning.cadh.africa"):
+def create_smart_video_response(video_urls, course_name, course_id, token, phone: str | None = None, base_url: str = "https://elearning.cadh.africa"):
     """Download videos and serve them DIRECTLY in WhatsApp messages"""
 
     if not video_urls:
-        response_text = "No videos available for this course."
+        if phone:
+            response_text = localize(
+                phone,
+                "No videos available for this course.",
+                "Tewali vidiyo ku ssomo lino."
+            )
+        else:
+            response_text = "No videos available for this course."
         escaped_text = escape_xml(response_text)
         return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
     
     messages_xml = []
     
     # Send header message
+    header_text = (
+        localize(
+            phone,
+            f"🎥 {course_name} - Downloading videos...",
+            f"🎥 {course_name} - Nkka vidiyo...",
+        )
+        if phone
+        else f"🎥 {course_name} - Downloading videos..."
+    )
     header_message = f'''<Message>
-        <Body>🎥 {escape_xml(course_name)} - Downloading videos...</Body>
+        <Body>{escape_xml(header_text)}</Body>
     </Message>'''
     messages_xml.append(header_message)
     
@@ -327,16 +494,41 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
             video_urls,
             course_name,
             note="Could not download videos to WhatsApp right now. Sharing direct links instead."
+            if not phone
+            else localize(
+                phone,
+                "Could not download videos to WhatsApp right now. Sharing direct links instead.",
+                "Sisobodde kka vidiyo ku WhatsApp kati. Nsindika enkolagana ezitereevu mu kifo kyazo."
+            ),
+            phone=phone,
         )
     
     # Now send the videos to WhatsApp
+    videos_header_text = (
+        localize(
+            phone,
+            f"🎥 {course_name} - Available Videos ({len(downloaded_videos)})",
+            f"🎥 {course_name} - Vidiyo Eziriwo ({len(downloaded_videos)})",
+        )
+        if phone
+        else f"🎥 {course_name} - Available Videos ({len(downloaded_videos)})"
+    )
     videos_header = f'''<Message>
-        <Body>🎥 {escape_xml(course_name)} - Available Videos ({len(downloaded_videos)})</Body>
+        <Body>{escape_xml(videos_header_text)}</Body>
     </Message>'''
     messages_xml.append(videos_header)
     
+    nav_text = (
+        localize(
+            phone,
+            "💡 Each video will appear below. Tap to play directly in WhatsApp!\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit",
+            "💡 Buli vidiyo ejja kulabika wansi. Nyiga okugizannya butereevu mu WhatsApp!\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Ddayo ku Ssomo • 00️⃣ Mala",
+        )
+        if phone
+        else "💡 Each video will appear below. Tap to play directly in WhatsApp!\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit"
+    )
     nav_message = f'''<Message>
-        <Body>💡 Each video will appear below. Tap to play directly in WhatsApp!\n\n💡 Navigation:\n0️⃣ Main Menu • 9️⃣ Back to Course • 00️⃣ Exit</Body>
+        <Body>{escape_xml(nav_text)}</Body>
     </Message>'''
     messages_xml.append(nav_message)
     
@@ -359,16 +551,31 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
 </Response>'''
 
 
-def create_video_links_response(videos, course_name, note: str = ""):
+def create_video_links_response(videos, course_name, note: str = "", phone: str | None = None):
     """Return direct video URLs as text messages (works even when media delivery fails)."""
     if not videos:
-        response_text = "No videos available for this course."
+        if phone:
+            response_text = localize(
+                phone,
+                "No videos available for this course.",
+                "Tewali vidiyo ku ssomo lino."
+            )
+        else:
+            response_text = "No videos available for this course."
         escaped_text = escape_xml(response_text)
         return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
 
     messages_xml = []
 
-    header_text = f"🔗 {course_name} - Video Links"
+    header_text = (
+        localize(
+            phone,
+            f"🔗 {course_name} - Video Links",
+            f"🔗 {course_name} - Enkolagana za Vidiyo",
+        )
+        if phone
+        else f"🔗 {course_name} - Video Links"
+    )
     if note:
         header_text = f"{header_text}\n\n⚠️ {note}"
     messages_xml.append(
@@ -398,13 +605,13 @@ def create_video_links_response(videos, course_name, note: str = ""):
         remaining = total_with_urls - sent
         messages_xml.append(
             f'''<Message>
-            <Body>{escape_xml(f"... and {remaining} more video link(s).")}</Body>
+            <Body>{escape_xml(localize(phone, f"... and {remaining} more video link(s).", f"... era waliwo enkolagana za vidiyo endala {remaining}.") if phone else f"... and {remaining} more video link(s).")}</Body>
         </Message>'''
         )
 
     messages_xml.append(
-        '''<Message>
-        <Body>💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu</Body>
+        f'''<Message>
+        <Body>{escape_xml(localize(phone, "💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu", "💡 Ggulawo enkolagana yonna mu browser yo.\n\nNavigation:\n9️⃣ Ddayo • 0️⃣ Main Menu") if phone else "💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu")}</Body>
     </Message>'''
     )
 
@@ -521,17 +728,30 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
 
 # ====== NEW: MINIMAL MOODLE INTEGRATION ======
 
-def create_moodle_pdf_response(pdfs, course_name):
+def create_moodle_pdf_response(pdfs, course_name, phone: str | None = None):
     """Create response for Moodle PDFs"""
     if not pdfs:
-        response_text = f"No PDFs available for {course_name}"
+        response_text = (
+            localize(phone, f"No PDFs available for {course_name}", f"Tewali PDF eziriwo ku {course_name}")
+            if phone
+            else f"No PDFs available for {course_name}"
+        )
         escaped_text = escape_xml(response_text)
         return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
     
     messages_xml = []
     
+    header_text = (
+        localize(
+            phone,
+            f"📚 {course_name} - PDFs ({len(pdfs)})",
+            f"📚 {course_name} - PDF ({len(pdfs)})",
+        )
+        if phone
+        else f"📚 {course_name} - PDFs ({len(pdfs)})"
+    )
     header = f'''<Message>
-        <Body>📚 {escape_xml(course_name)} - PDFs ({len(pdfs)})</Body>
+        <Body>{escape_xml(header_text)}</Body>
     </Message>'''
     messages_xml.append(header)
     
@@ -544,12 +764,21 @@ def create_moodle_pdf_response(pdfs, course_name):
     
     if len(pdfs) > 5:
         remaining = f'''<Message>
-            <Body>... and {len(pdfs) - 5} more PDFs</Body>
+            <Body>{escape_xml(localize(phone, f"... and {len(pdfs) - 5} more PDFs", f"... era waliwo PDF endala {len(pdfs) - 5}") if phone else f"... and {len(pdfs) - 5} more PDFs")}</Body>
         </Message>'''
         messages_xml.append(remaining)
     
+    nav_text = (
+        localize(
+            phone,
+            "💡 Tap any PDF to view it in WhatsApp.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu",
+            "💡 Nyiga ku PDF yonna okugiraba mu WhatsApp.\n\nNavigation:\n9️⃣ Ddayo • 0️⃣ Main Menu",
+        )
+        if phone
+        else "💡 Tap any PDF to view it in WhatsApp.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu"
+    )
     nav_message = f'''<Message>
-        <Body>💡 Tap any PDF to view it in WhatsApp.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu</Body>
+        <Body>{escape_xml(nav_text)}</Body>
     </Message>'''
     messages_xml.append(nav_message)
     
@@ -567,9 +796,12 @@ async def handle_moodle_login_flow(phone, raw_msg):
         user_moodle_data[phone]["username"] = raw_msg.strip()
         user_state[phone] = "moodle_password"
 
-        response_text = (
+        response_text = localize(
+            phone,
             "🔐 *Moodle Login*\n\n"
-            "Please enter your Moodle password:"
+            "Please enter your Moodle password:",
+            "🔐 *Okweyingiza ku Moodle*\n\n"
+            "Wandiika akasumuluzo ko aka Moodle:"
         )
         escaped_text = escape_xml(response_text)
         raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
@@ -580,9 +812,12 @@ async def handle_moodle_login_flow(phone, raw_msg):
         username = user_moodle_data.get(phone, {}).get("username")
         if not username:
             user_state[phone] = "moodle_username"
-            response_text = (
+            response_text = localize(
+                phone,
                 "🔐 *Login Required*\n\n"
-                "Please enter your Moodle username:"
+                "Please enter your Moodle username:",
+                "🔐 *Okweyingiza Kwetaagisa*\n\n"
+                "Wandiika erinnya lyo ery'okweyingiza ku Moodle:"
             )
             escaped_text = escape_xml(response_text)
             raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
@@ -593,10 +828,14 @@ async def handle_moodle_login_flow(phone, raw_msg):
 
         if not auth_result:
             user_state[phone] = "moodle_username"
-            response_text = (
+            response_text = localize(
+                phone,
                 "*Login failed*\n\n"
                 "Invalid username or password.\n"
-                "Please enter your Moodle username again:"
+                "Please enter your Moodle username again:",
+                "*Okweyingiza kulemye*\n\n"
+                "Erinnya oba akasumuluzo si kituufu.\n"
+                "Wandiika nate erinnya lyo ery'okweyingiza ku Moodle:"
             )
             escaped_text = escape_xml(response_text)
             raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
@@ -619,19 +858,29 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
                 
                 if not enrolled_courses:
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         "🎓 *Your Enrolled Courses*\n\n"
                         "You are not enrolled in any courses yet.\n\n"
                         "💡 Browse courses (option 1) to enroll in new courses.\n\n"
-                        "0️⃣ Main Menu • #️⃣ Exit"
+                        "0️⃣ Main Menu • #️⃣ Exit",
+                        "🎓 *Amasomo Go Ge Nnegattako*\n\n"
+                        "Tonnawegatta ku ssomo lyonna okutuuka kati.\n\n"
+                        "💡 Kozesa option 1 okulaba amasomo n'okweegatta ku mapya.\n\n"
+                        "0️⃣ Main Menu • #️⃣ Mala"
                     )
                 else:
                     course_list = "\n".join([f"{i+1}. {course['name']}" for i, course in enumerate(enrolled_courses)])
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         "🎓 *Your Enrolled Courses*\n\n"
                         f"{course_list}\n\n"
                         "0️⃣ Main Menu • #️⃣ Exit\n\n"
-                        "Select a course number to access:"
+                        "Select a course number to access:",
+                        "🎓 *Amasomo Go Ge Nnegattako*\n\n"
+                        f"{course_list}\n\n"
+                        "0️⃣ Main Menu • #️⃣ Mala\n\n"
+                        "Londa namba y'essomo okulyingiramu:"
                     )
                 user_state[phone] = "my_courses"
                 
@@ -648,7 +897,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 course_data = courses.get(str(course_id), {})
                 
                 if not course_data:
-                    response_text = "Course not found."
+                    response_text = localize(phone, "Course not found.", "Essomo terirabiddwa.")
                     escaped_text = escape_xml(response_text)
                     raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
                     return Response(content=raw_xml, media_type="application/xml")
@@ -664,7 +913,8 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 if is_enrolled:
                     # User IS enrolled - show course content menu
                     user_state[phone] = f"enrolled_{course_id}"
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         f"🎓 *{course_data['name']}*\n\n"
                         f"✅ *Status:* You are already enrolled\n\n"
                         f"📊 *Course Overview:*\n"
@@ -675,12 +925,24 @@ async def handle_moodle_login_flow(phone, raw_msg):
                         "2️⃣ Video Lessons\n"
                         "3️⃣ Course Overview\n\n"
                         "💡 *Navigation:*\n"
-                        "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
+                        "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit",
+                        f"🎓 *{course_data['name']}*\n\n"
+                        f"✅ *Embeera:* Weegasse dda\n\n"
+                        f"📊 *Okulaba Essomo mu Bufunze:*\n"
+                        f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
+                        f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                        "Oyagala kufunamu ki?\n"
+                        "1️⃣ Eby'okuyigira (PDF)\n"
+                        "2️⃣ Vidiyo z'Okuyiga\n"
+                        "3️⃣ Okulaba Essomo mu Bufunze\n\n"
+                        "💡 *Navigation:*\n"
+                        "0️⃣ Main Menu • 9️⃣ Ddayo ku Kulaba Amasomo • #️⃣ Mala"
                     )
                 else:
                     # User NOT enrolled - show enroll option
                     user_state[phone] = f"browsing_{course_id}"
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         f"📚 *{course_data['name']}*\n\n"
                         f"📊 *Course Overview:*\n"
                         f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
@@ -688,7 +950,15 @@ async def handle_moodle_login_flow(phone, raw_msg):
                         "🔒 *You are NOT enrolled in this course*\n\n"
                         "1️⃣ Enroll in this Course\n\n"
                         "💡 *Navigation:*\n"
-                        "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
+                        "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit",
+                        f"📚 *{course_data['name']}*\n\n"
+                        f"📊 *Okulaba Essomo mu Bufunze:*\n"
+                        f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
+                        f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                        "🔒 *Tonnawegatta ku ssomo lino*\n\n"
+                        "1️⃣ Weegatte ku Ssomo lino\n\n"
+                        "💡 *Navigation:*\n"
+                        "0️⃣ Main Menu • 9️⃣ Ddayo ku Kulaba Amasomo • #️⃣ Mala"
                     )
                 
                 escaped_text = escape_xml(response_text)
@@ -723,7 +993,8 @@ async def handle_moodle_login_flow(phone, raw_msg):
                     course_data = courses.get(str(course_id), {})
                     
                     # AUTOMATICALLY SHOW CONTENT MENU
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         f"🎉 *Enrollment Successful!*\n\n"
                         f"✅ You are now enrolled in: *{course_name}*\n\n"
                         f"📊 *Course Overview:*\n"
@@ -734,7 +1005,18 @@ async def handle_moodle_login_flow(phone, raw_msg):
                         "2️⃣ Video Lessons\n"
                         "3️⃣ Course Overview\n\n"
                         "💡 *Navigation:*\n"
-                        "0️⃣ Main Menu • 9️⃣ Back to Courses • #️⃣ Exit"
+                        "0️⃣ Main Menu • 9️⃣ Back to Courses • #️⃣ Exit",
+                        f"🎉 *Okweyunga Kukwatiddwa!* \n\n"
+                        f"✅ Kaakano weegasse ku: *{course_name}*\n\n"
+                        f"📊 *Okulaba Essomo mu Bufunze:*\n"
+                        f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
+                        f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                        "Oyagala kutandika na ki?\n"
+                        "1️⃣ Eby'okuyigira (PDF)\n"
+                        "2️⃣ Vidiyo z'Okuyiga\n"
+                        "3️⃣ Okulaba Essomo mu Bufunze\n\n"
+                        "💡 *Navigation:*\n"
+                        "0️⃣ Main Menu • 9️⃣ Ddayo ku Masomo • #️⃣ Mala"
                     )
                     
                     escaped_text = escape_xml(response_text)
@@ -742,20 +1024,32 @@ async def handle_moodle_login_flow(phone, raw_msg):
                     return Response(content=raw_xml, media_type="application/xml")
 
                 else:
-                    response_text = "Enrollment failed. Please try again."
+                    response_text = localize(
+                        phone,
+                        "Enrollment failed. Please try again.",
+                        "Okweyunga kulemye. Gezaako nate."
+                    )
                     escaped_text = escape_xml(response_text)
                     raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
                     return Response(content=raw_xml, media_type="application/xml")
         
         # If no intent or intent not handled, go to main menu
         user_state[phone] = "main_menu"
-        response_text = (
+        response_text = localize(
+            phone,
             f"✅ *Login Successful!*\n\n"
             f"Welcome, *{auth_result['fullname']}* 🎉\n\n"
             "You can now continue enrolling in courses.\n\n"
             "Reply with:\n"
             "1️⃣ Browse Courses\n"
             "2️⃣ My Enrolled Courses\n"
+            "0️⃣ Main Menu",
+            f"✅ *Okweyingiza Kuyise Bulungi!*\n\n"
+            f"Tukwaniriza, *{auth_result['fullname']}* 🎉\n\n"
+            "Kati osobola okugenda mu maaso n'okweegatta ku masomo.\n\n"
+            "Ddamu nga okozesa:\n"
+            "1️⃣ Laba Amasomo\n"
+            "2️⃣ Amasomo Gange Ge Nnegattako\n"
             "0️⃣ Main Menu"
         )
         
@@ -779,8 +1073,32 @@ def is_enrolled_live(phone, course_id):
 
     return is_user_enrolled_in_course(token, userid, int(course_id))
 
-def main_menu_text():
-    return (
+def main_menu_text(phone: str, first_time: bool = False):
+    if first_time:
+        return localize(
+            phone,
+            "👋 Hello! Welcome to MoH E-Learning Assistant!\n\n"
+            "📚 *Available Actions:*\n"
+            "1️⃣ Browse Courses\n"
+            "2️⃣ My Enrolled Courses\n"
+            "3️⃣ Take a Quiz\n"
+            "4️⃣ View Quiz Results\n"
+            "5️⃣ Ask Trainer for Help\n"
+            "6️⃣ Ask Question Q&A\n\n"
+            "0️⃣ Main Menu • #️⃣ Exit",
+            "👋 Ki bulungi! Tukwaniriza ku MoH E-Learning Assistant!\n\n"
+            "📚 *Ebikolebwa Eriwo:*\n"
+            "1️⃣ Laba Amasomo\n"
+            "2️⃣ Amasomo Gange Ge Nnegattako\n"
+            "3️⃣ Kola Ekigezo\n"
+            "4️⃣ Laba Ebivudde mu Kigezo\n"
+            "5️⃣ Saba Omusomesa Obuyambi\n"
+            "6️⃣ Buuza Ekibuuzo\n\n"
+            "0️⃣ Main Menu • #️⃣ Mala"
+        )
+
+    return localize(
+        phone,
         "👋 Welcome back to MoH E-Learning Assistant!\n\n"
         "📚 *Available Actions:*\n"
         "1️⃣ Browse Courses\n"
@@ -789,7 +1107,16 @@ def main_menu_text():
         "4️⃣ View Quiz Results\n"
         "5️⃣ Ask Trainer for Help\n"
         "6️⃣ Ask Question Q&A\n\n"
-        "0️⃣ Main Menu • #️⃣ Exit"
+        "0️⃣ Main Menu • #️⃣ Exit",
+        "👋 Tukwaniriza nate ku MoH E-Learning Assistant!\n\n"
+        "📚 *Ebikolebwa Eriwo:*\n"
+        "1️⃣ Laba Amasomo\n"
+        "2️⃣ Amasomo Gange Ge Nnegattako\n"
+        "3️⃣ Kola Ekigezo\n"
+        "4️⃣ Laba Ebivudde mu Kigezo\n"
+        "5️⃣ Saba Omusomesa Obuyambi\n"
+        "6️⃣ Buuza Ekibuuzo\n\n"
+        "0️⃣ Main Menu • #️⃣ Mala"
     )
 
 @router.post("/")  
@@ -802,7 +1129,28 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     # Twilio status callbacks may hit this webhook without message content.
     if not phone or not raw_msg:
         return twiml_message()
-    
+
+    # ====== FIRST CONTACT ======
+    if phone not in user_state:
+        user_state[phone] = "language_selection"
+        return twiml_message(language_selection_text())
+
+    # ====== LANGUAGE SELECTION ======
+    if user_state.get(phone) == "language_selection":
+        if user_msg in {"1", "english", "en"}:
+            set_session_language(phone, "en")
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text(phone, first_time=True))
+        if user_msg in {"2", "luganda", "lg"}:
+            set_session_language(phone, "lg")
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text(phone, first_time=True))
+        if user_msg in {"#", "exit", "quit"}:
+            user_state.pop(phone, None)
+            clear_session_language(phone)
+            return twiml_message(goodbye_text(phone))
+        return twiml_message(language_selection_text(invalid=True))
+
     # ====== CHECK FOR MOODLE LOGIN FLOW FIRST ======
     if user_state.get(phone, "") in ["moodle_username", "moodle_password"]:
         login_response = await handle_moodle_login_flow(phone, raw_msg)
@@ -814,30 +1162,21 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
         try:
             clear_courses_cache()
             fresh_courses = get_available_courses(force_refresh=True)
-            response_text = (
-                f"🔄 Course list refreshed.\n\n"
-                f"Found {len(fresh_courses)} course(s) from Moodle.\n\n"
-                "Reply 1 to browse courses."
-            )
+            if fresh_courses:
+                response_text = localize(
+                    phone,
+                    f"🔄 Course list refreshed.\n\nFound {len(fresh_courses)} course(s) from Moodle.\n\nReply 1 to browse courses.",
+                    f"🔄 Olukalala lw'amasomo luzziddwa buggya.\n\nTulabye amasomo {len(fresh_courses)} okuva ku Moodle.\n\nDdamu ne 1 okulaba amasomo."
+                )
+            else:
+                response_text = browse_courses_empty_text(phone)
         except Exception:
-            response_text = "⚠️ Refresh failed. Please try again in a few seconds."
+            response_text = localize(
+                phone,
+                "⚠️ Refresh failed. Please try again in a few seconds.",
+                "⚠️ Okuzza obuggya kulemye. Gezaako nate mu kaseera katono."
+            )
 
-        return twiml_message(response_text)
-    
-    # ====== FIRST CONTACT ======
-    if phone not in user_state:
-        user_state[phone] = "main_menu"
-        response_text = (
-            "👋 Hello! Welcome to the MoH E-Learning Assistant!\n\n"
-            "📚 *Available Actions:*\n"
-            "1️⃣ Browse Courses\n"
-            "2️⃣ My Enrolled Courses\n"
-            "3️⃣ Take a Quiz\n"
-            "4️⃣ View Quiz Results\n"
-            "5️⃣ Ask Trainer for Help\n"
-            "6️⃣ Ask Question Q&A\n\n"
-            "0️⃣ Main Menu • #️⃣ Exit"
-        )
         return twiml_message(response_text)
     
     # ====== MAIN MENU ======
@@ -848,19 +1187,20 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             course_ids = list(courses.keys())
 
             if not courses:
-                response_text = (
-                    "📚 *Browse Courses*\n\n"
-                    "Currently no courses are available.\n\n"
-                    "0️⃣ Main Menu • #️⃣ Exit"
-                )
+                response_text = browse_courses_empty_text(phone)
             else:
                 course_list = "\n".join([f"{i+1}. {course['name']}" for i, course in enumerate(courses.values())])
-                response_text = (
+                response_text = localize(
+                    phone,
                     "📚 *Browse Available Courses*\n\n"
                     f"{course_list}\n\n"
                     "0️⃣ Main Menu • #️⃣ Exit\n\n"
-                    "Select a course number to view details:"
-                )      
+                    "Select a course number to view details:",
+                    "📚 *Laba Amasomo Agaliwo*\n\n"
+                    f"{course_list}\n\n"
+                    "0️⃣ Main Menu • #️⃣ Mala\n\n"
+                    "Londa namba y'essomo okulaba ebisingawo:"
+                )
                 
         elif user_msg in ["2", "enrolled"]:
             # Check if user is logged into Moodle
@@ -872,19 +1212,29 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
                 
                 if not enrolled_courses:
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         "🎓 *Your Enrolled Courses*\n\n"
                         "You are not enrolled in any courses yet.\n\n"
                         "💡 Browse courses (option 1) to enroll in new courses.\n\n"
-                        "0️⃣ Main Menu • #️⃣ Exit"
+                        "0️⃣ Main Menu • #️⃣ Exit",
+                        "🎓 *Amasomo Go Ge Nnegattako*\n\n"
+                        "Tonnawegatta ku ssomo lyonna okutuuka kati.\n\n"
+                        "💡 Kozesa option 1 okulaba amasomo n'okweegatta ku mapya.\n\n"
+                        "0️⃣ Main Menu • #️⃣ Mala"
                     )
                 else:
                     course_list = "\n".join([f"{i+1}. {course['name']}" for i, course in enumerate(enrolled_courses)])
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         "🎓 *Your Enrolled Courses*\n\n"
                         f"{course_list}\n\n"
                         "0️⃣ Main Menu • #️⃣ Exit\n\n"
-                        "Select a course number to access:"
+                        "Select a course number to access:",
+                        "🎓 *Amasomo Go Ge Nnegattako*\n\n"
+                        f"{course_list}\n\n"
+                        "0️⃣ Main Menu • #️⃣ Mala\n\n"
+                        "Londa namba y'essomo okulyingiramu:"
                     )
                 user_state[phone] = "my_courses"
             else:
@@ -901,38 +1251,58 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 # 🎯 THIRD: Change state to start login flow
                 user_state[phone] = "moodle_username"
                 
-                response_text = (
+                response_text = localize(
+                    phone,
                     "🔐 *Login Required*\n\n"
                     "To view your enrolled courses, you need to login first.\n\n"
-                    "Please enter your username:"
+                    "Please enter your username:",
+                    "🔐 *Okweyingiza Kwetaagisa*\n\n"
+                    "Okulaba amasomo go ge nnegattako, sooka weyingize.\n\n"
+                    "Wandiika erinnya lyo ery'okweyingiza:"
                 )
 
         elif user_msg in ["3", "quiz"]:
             user_state[phone] = "quiz_selection"
-            response_text = (
+            response_text = localize(
+                phone,
                 "📝 *Quiz Center*\n\n"
                 "Available quizzes:\n"
                 "1. Infection Prevention Basics\n"
                 "2. Safety Procedures\n"
                 "3. Emergency Protocols\n\n"
                 "0️⃣ Main Menu • #️⃣ Exit\n\n"
-                "Select a quiz number to start:"
+                "Select a quiz number to start:",
+                "📝 *Ekifo ky'Ebigezo*\n\n"
+                "Ebigezo ebiriwo:\n"
+                "1. Infection Prevention Basics\n"
+                "2. Safety Procedures\n"
+                "3. Emergency Protocols\n\n"
+                "0️⃣ Main Menu • #️⃣ Mala\n\n"
+                "Londa namba y'ekigezo okutandika:"
             )
             
         elif user_msg in ["4", "results"]:
             user_state[phone] = "view_results"
-            response_text = (
+            response_text = localize(
+                phone,
                 "📊 *Your Quiz Results*\n\n"
                 "🦠 Infection Prevention: 85%\n"
                 "🛡️ Safety Procedures: 92%\n"
                 "🚨 Emergency Protocols: 78%\n\n"
                 "Overall Performance: Good! 🎉\n\n"
-                "0️⃣ Main Menu • 3️⃣ Take New Quiz"
+                "0️⃣ Main Menu • 3️⃣ Take New Quiz",
+                "📊 *Ebivudde mu Bigezo Byo*\n\n"
+                "🦠 Infection Prevention: 85%\n"
+                "🛡️ Safety Procedures: 92%\n"
+                "🚨 Emergency Protocols: 78%\n\n"
+                "Emitendera gyo okutwalira awamu: Girungi! 🎉\n\n"
+                "0️⃣ Main Menu • 3️⃣ Kola Ekigezo Ekipya"
             )
             
         elif user_msg in ["5", "help", "trainer"]:
             user_state[phone] = "ask_trainer"
-            response_text = (
+            response_text = localize(
+                phone,
                 "👨‍🏫 *Trainer Support*\n\n"
                 "Need help with a specific topic? Our trainers are here to assist you!\n\n"
                 "Please describe what you need help with:\n"
@@ -940,7 +1310,15 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 "• Technical issues\n"
                 "• Course content questions\n"
                 "• Other learning support\n\n"
-                "0️⃣ Main Menu • #️⃣ Exit"
+                "0️⃣ Main Menu • #️⃣ Exit",
+                "👨‍🏫 *Obuyambi bw'Omusomesa*\n\n"
+                "Weetaaga obuyambi ku nsonga emu? Abasomesa baffe bali wano okukuyamba!\n\n"
+                "Nnyonnyola ky'oyagala okufunamu obuyambi:\n"
+                "• Ekitundu ky'otategedde bulungi\n"
+                "• Ebizibu eby'ekikugu\n"
+                "• Ebibuuzo ku birimu by'essomo\n"
+                "• Obuyambi obulala ku kuyiga\n\n"
+                "0️⃣ Main Menu • #️⃣ Mala"
             )
             
         elif user_msg in ["6", "ask", "question"]:
@@ -949,36 +1327,43 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             # Show available course materials for context
             courses = get_available_courses(force_refresh=True)
             if not courses:
-                response_text = (
-                    "🤖 *Document Q&A*\n\n"
-                    "No course materials available yet.\n\n"
-                    "Please upload documents first, then ask questions about them.\n\n"
-                    "0️⃣ Main Menu • #️⃣ Exit"
-                )
+                response_text = question_mode_empty_text(phone)
             else:
                 # Build list of available materials
-                materials_list = "📚 *Available Course Materials:*\n\n"
+                materials_list = localize(
+                    phone,
+                    "📚 *Available Course Materials:*\n\n",
+                    "📚 *Ebikozesebwa by'Amasomo Ebiriwo:*\n\n"
+                )
                 
                 for course_id, course_data in courses.items():
                     materials_list += f"🏷️ *{course_data['name']}*\n"
                     
                     materials_list += "\n"
                 
-                materials_list += (
+                materials_list += localize(
+                    phone,
                     "💡 *Ask questions about:*\n"
                     "• Specific topics from these materials\n"
-                    "0️⃣ Main Menu • #️⃣ Exit"
+                    "0️⃣ Main Menu • #️⃣ Exit",
+                    "💡 *Osobola okubuuza ku:*\n"
+                    "• Emitwe egy'enjawulo mu bikozesebwa bino\n"
+                    "0️⃣ Main Menu • #️⃣ Mala"
                 )
                 
                 response_text = materials_list
             
         elif user_msg in ["#", "exit", "quit"]:
-            response_text = "👋 Thank you for using MoH E-Learning Assistant!"
+            response_text = goodbye_text(phone)
             user_state.pop(phone, None)
+            clear_session_language(phone)
         else:
-            response_text = (
+            response_text = localize(
+                phone,
                 "Invalid option. Please reply with:\n"
-                "1️⃣-6️⃣ for actions or 0️⃣ for main menu"
+                "1️⃣-6️⃣ for actions or 0️⃣ for main menu",
+                "Olonze bubi. Ddamu nga okozesa:\n"
+                "1️⃣-6️⃣ okukola ebikolebwa oba 0️⃣ okudda ku main menu"
             )
         
         return twiml_message(response_text)
@@ -987,10 +1372,11 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     if user_state[phone] == "quiz_selection":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
-            return twiml_message(main_menu_text())
+            return twiml_message(main_menu_text(phone))
         if user_msg in ["#", "exit"]:
             user_state.pop(phone, None)
-            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+            clear_session_language(phone)
+            return twiml_message(goodbye_text(phone))
         if user_msg in ["1", "2", "3"]:
             user_state[phone] = "view_results"
             quiz_names = {
@@ -999,76 +1385,117 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 "3": "Emergency Protocols",
             }
             return twiml_message(
-                f"✅ You selected *{quiz_names[user_msg]}*.\n\n"
-                "This demo bot currently shows sample results only.\n\n"
-                "4️⃣ View Quiz Results • 0️⃣ Main Menu"
+                localize(
+                    phone,
+                    f"✅ You selected *{quiz_names[user_msg]}*.\n\n"
+                    "This demo bot currently shows sample results only.\n\n"
+                    "4️⃣ View Quiz Results • 0️⃣ Main Menu",
+                    f"✅ Olonze *{quiz_names[user_msg]}*.\n\n"
+                    "Demo bot eno eraga ebyokulabirako byokka ku bivudde mu bigezo.\n\n"
+                    "4️⃣ Laba Ebivudde mu Kigezo • 0️⃣ Main Menu"
+                )
             )
-        return twiml_message("Please select quiz 1, 2, 3 or 0 for main menu.")
+        return twiml_message(localize(phone, "Please select quiz 1, 2, 3 or 0 for main menu.", "Londa ekigezo 1, 2, 3 oba 0 okudda ku main menu."))
 
     # ====== VIEW RESULTS HANDLER ======
     if user_state[phone] == "view_results":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
-            return twiml_message(main_menu_text())
+            return twiml_message(main_menu_text(phone))
         if user_msg in ["3", "quiz", "take new quiz"]:
             user_state[phone] = "quiz_selection"
             return twiml_message(
-                "📝 *Quiz Center*\n\n"
-                "Available quizzes:\n"
-                "1. Infection Prevention Basics\n"
-                "2. Safety Procedures\n"
-                "3. Emergency Protocols\n\n"
-                "0️⃣ Main Menu • #️⃣ Exit\n\n"
-                "Select a quiz number to start:"
+                localize(
+                    phone,
+                    "📝 *Quiz Center*\n\n"
+                    "Available quizzes:\n"
+                    "1. Infection Prevention Basics\n"
+                    "2. Safety Procedures\n"
+                    "3. Emergency Protocols\n\n"
+                    "0️⃣ Main Menu • #️⃣ Exit\n\n"
+                    "Select a quiz number to start:",
+                    "📝 *Ekifo ky'Ebigezo*\n\n"
+                    "Ebigezo ebiriwo:\n"
+                    "1. Infection Prevention Basics\n"
+                    "2. Safety Procedures\n"
+                    "3. Emergency Protocols\n\n"
+                    "0️⃣ Main Menu • #️⃣ Mala\n\n"
+                    "Londa namba y'ekigezo okutandika:"
+                )
             )
         if user_msg in ["#", "exit"]:
             user_state.pop(phone, None)
-            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+            clear_session_language(phone)
+            return twiml_message(goodbye_text(phone))
         return twiml_message(
-            "📊 *Your Quiz Results*\n\n"
-            "🦠 Infection Prevention: 85%\n"
-            "🛡️ Safety Procedures: 92%\n"
-            "🚨 Emergency Protocols: 78%\n\n"
-            "Overall Performance: Good! 🎉\n\n"
-            "0️⃣ Main Menu • 3️⃣ Take New Quiz"
+            localize(
+                phone,
+                "📊 *Your Quiz Results*\n\n"
+                "🦠 Infection Prevention: 85%\n"
+                "🛡️ Safety Procedures: 92%\n"
+                "🚨 Emergency Protocols: 78%\n\n"
+                "Overall Performance: Good! 🎉\n\n"
+                "0️⃣ Main Menu • 3️⃣ Take New Quiz",
+                "📊 *Ebivudde mu Bigezo Byo*\n\n"
+                "🦠 Infection Prevention: 85%\n"
+                "🛡️ Safety Procedures: 92%\n"
+                "🚨 Emergency Protocols: 78%\n\n"
+                "Emitendera gyo okutwalira awamu: Girungi! 🎉\n\n"
+                "0️⃣ Main Menu • 3️⃣ Kola Ekigezo Ekipya"
+            )
         )
 
     # ====== TRAINER SUPPORT HANDLER ======
     if user_state[phone] == "ask_trainer":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
-            return twiml_message(main_menu_text())
+            return twiml_message(main_menu_text(phone))
         if user_msg in ["#", "exit"]:
             user_state.pop(phone, None)
-            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+            clear_session_language(phone)
+            return twiml_message(goodbye_text(phone))
         user_state[phone] = "main_menu"
         return twiml_message(
-            "✅ Your message has been sent to a trainer.\n\n"
-            "A trainer will follow up with you.\n\n"
-            "Returning to main menu:\n\n"
-            + main_menu_text()
+            localize(
+                phone,
+                "✅ Your message has been sent to a trainer.\n\n"
+                "A trainer will follow up with you.\n\n"
+                "Returning to main menu:\n\n",
+                "✅ Obubaka bwo busindikiddwa eri omusomesa.\n\n"
+                "Omusomesa ajja kukuddamu.\n\n"
+                "Okudda ku main menu:\n\n"
+            )
+            + main_menu_text(phone)
         )
 
     # ====== QUESTION MODE HANDLER ======
     if user_state[phone] == "question_mode":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
-            return twiml_message(main_menu_text())
+            return twiml_message(main_menu_text(phone))
         if user_msg in ["#", "exit"]:
             user_state.pop(phone, None)
-            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+            clear_session_language(phone)
+            return twiml_message(goodbye_text(phone))
 
         try:
-            chat_response = answer_question(ChatRequest(question=raw_msg))
-            response_text = (
-                f"🤖 {chat_response.answer}\n\n"
-                "Ask another question, or reply 0 for main menu."
+            chat_response = answer_question(
+                ChatRequest(
+                    question=raw_msg,
+                    context_prompt="Respond in Luganda." if get_session_language(phone) == "lg" else None,
+                )
+            )
+            response_text = localize(
+                phone,
+                f"🤖 {chat_response.answer}\n\nAsk another question, or reply 0 for main menu.",
+                f"🤖 {chat_response.answer}\n\nBuuza ekibuuzo ekirala, oba ddamu ne 0 okudda ku main menu."
             )
         except Exception as e:
             print(f"Q&A error: {e}")
-            response_text = (
-                "⚠️ I could not process your question right now.\n\n"
-                "Please try again, or reply 0 for main menu."
+            response_text = localize(
+                phone,
+                "⚠️ I could not process your question right now.\n\nPlease try again, or reply 0 for main menu.",
+                "⚠️ Sisobodde kukola ku kibuuzo kyo mu kaseera kano.\n\nGezaako nate, oba ddamu ne 0 okudda ku main menu."
             )
         return twiml_message(response_text)
 
@@ -1076,20 +1503,11 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     if user_state[phone] == "my_courses":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
-            response_text = (
-                "👋 Welcome back to MoH E-Learning Assistant!\n\n"
-                "📚 *Available Actions:*\n"
-                "1️⃣ Browse Courses\n"
-                "2️⃣ My Enrolled Courses\n"
-                "3️⃣ Take a Quiz\n"
-                "4️⃣ View Quiz Results\n"
-                "5️⃣ Ask Trainer for Help\n"
-                "6️⃣ Ask Question Q&A\n\n"
-                "0️⃣ Main Menu • #️⃣ Exit"
-            )
+            response_text = main_menu_text(phone)
         elif user_msg in ["#", "exit"]:
-            response_text = "👋 Thank you for using MoH E-Learning Assistant!"
+            response_text = goodbye_text(phone)
             user_state.pop(phone, None)
+            clear_session_language(phone)
         else:
             # Get user's enrolled courses
             if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
@@ -1107,7 +1525,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     
                     if course_data:
                         user_state[phone] = f"enrolled_{course_id}"
-                        response_text = (
+                        response_text = localize(
+                            phone,
                             f"🎓 *{selected_course['name']}*\n\n"
                             f"📊 *Course Overview:*\n"
                             f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
@@ -1117,21 +1536,32 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                             "2️⃣ Video Lessons\n"
                             "3️⃣ Course Overview\n\n"
                             "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
+                            "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit",
+                            f"🎓 *{selected_course['name']}*\n\n"
+                            f"📊 *Okulaba Essomo mu Bufunze:*\n"
+                            f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
+                            f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                            "Oyagala kufunamu ki?\n"
+                            "1️⃣ Eby'okuyigira (PDF)\n"
+                            "2️⃣ Vidiyo z'Okuyiga\n"
+                            "3️⃣ Okulaba Essomo mu Bufunze\n\n"
+                            "💡 *Navigation:*\n"
+                            "0️⃣ Main Menu • 9️⃣ Ddayo ku Masomo Gange • #️⃣ Mala"
                         )
                     else:
-                        response_text = (
-                            f"Course content not available for: {selected_course['name']}\n\n"
-                            "Please try another course or contact support."
+                        response_text = localize(
+                            phone,
+                            f"Course content not available for: {selected_course['name']}\n\nPlease try another course or contact support.",
+                            f"Ebirimu eby'essomo tebiriwo ku: {selected_course['name']}\n\nGezaako essomo eddala oba otuukirire abayambi."
                         )
                 else:
-                    response_text = (
-                        "Invalid course number.\n\n"
-                        "💡 *Navigation:*\n"
-                        "0️⃣ Main Menu • #️⃣ Exit"
+                    response_text = localize(
+                        phone,
+                        "Invalid course number.\n\n💡 *Navigation:*\n0️⃣ Main Menu • #️⃣ Exit",
+                        "Namba y'essomo si ntuufu.\n\n💡 *Navigation:*\n0️⃣ Main Menu • #️⃣ Mala"
                     )
             else:
-                response_text = "Please login first to access your courses."
+                response_text = localize(phone, "Please login first to access your courses.", "Sooka weyingize okufuna amasomo go.")
                 user_state[phone] = "main_menu"
         
         return twiml_message(response_text)
@@ -1140,10 +1570,11 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     if user_state[phone] == "browse_courses":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
-            response_text = main_menu_text()
+            response_text = main_menu_text(phone)
         elif user_msg in ["#", "exit"]:
-            response_text = "👋 Thank you for using MoH E-Learning Assistant!"
+            response_text = goodbye_text(phone)
             user_state.pop(phone, None)
+            clear_session_language(phone)
         else:
             all_courses = get_available_courses()
             course_keys = list(all_courses.keys())  # these are actual Moodle IDs as strings
@@ -1160,10 +1591,10 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                         'course_id': selected_course_id
                     }
                     user_state[phone] = "moodle_username"
-                    response_text = (
-                        f"🔐 *Login Required*\n\n"
-                        f"To view '{selected_course['name']}' or enroll, please login first.\n\n"
-                        "Enter your username:"
+                    response_text = localize(
+                        phone,
+                        f"🔐 *Login Required*\n\nTo view '{selected_course['name']}' or enroll, please login first.\n\nEnter your username:",
+                        f"🔐 *Okweyingiza Kwetaagisa*\n\nOkulaba '{selected_course['name']}' oba okweegatta, sooka weyingize.\n\nWandiika erinnya lyo ery'okweyingiza:"
                     )
                 else:
                     # Logged in - fetch enrolled courses
@@ -1177,7 +1608,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
 
                     if is_enrolled:
                         user_state[phone] = f"enrolled_{selected_course_id}"
-                        response_text = (
+                        response_text = localize(
+                            phone,
                             f"🎓 *{selected_course['name']}*\n\n"
                             f"✅ *Status:* Already enrolled\n\n"
                             f"📊 *Course Overview:*\n"
@@ -1188,11 +1620,23 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                             "2️⃣ Video Lessons\n"
                             "3️⃣ Course Overview\n\n"
                             "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
+                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit",
+                            f"🎓 *{selected_course['name']}*\n\n"
+                            f"✅ *Embeera:* Weegasse dda\n\n"
+                            f"📊 *Okulaba Essomo mu Bufunze:*\n"
+                            f"• {len(selected_course.get('pdfs', []))} PDFs\n"
+                            f"• {len(selected_course.get('videos', []))} Videos\n\n"
+                            "Oyagala kufunamu ki?\n"
+                            "1️⃣ Eby'okuyigira (PDF)\n"
+                            "2️⃣ Vidiyo z'Okuyiga\n"
+                            "3️⃣ Okulaba Essomo mu Bufunze\n\n"
+                            "💡 *Navigation:*\n"
+                            "0️⃣ Main Menu • 9️⃣ Ddayo ku Kulaba Amasomo • #️⃣ Mala"
                         )
                     else:
                         user_state[phone] = f"browsing_{selected_course_id}"
-                        response_text = (
+                        response_text = localize(
+                            phone,
                             f"📚 *{selected_course['name']}*\n\n"
                             f"📊 *Course Overview:*\n"
                             f"• {len(selected_course.get('pdfs', []))} PDFs\n"
@@ -1200,13 +1644,21 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                             "🔒 *You are NOT enrolled in this course*\n\n"
                             "1️⃣ Enroll in this Course\n\n"
                             "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
+                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit",
+                            f"📚 *{selected_course['name']}*\n\n"
+                            f"📊 *Okulaba Essomo mu Bufunze:*\n"
+                            f"• {len(selected_course.get('pdfs', []))} PDFs\n"
+                            f"• {len(selected_course.get('videos', []))} Videos\n\n"
+                            "🔒 *Tonnawegatta ku ssomo lino*\n\n"
+                            "1️⃣ Weegatte ku Ssomo lino\n\n"
+                            "💡 *Navigation:*\n"
+                            "0️⃣ Main Menu • 9️⃣ Ddayo ku Kulaba Amasomo • #️⃣ Mala"
                         )
             else:
-                response_text = (
-                    "Invalid course number.\n\n"
-                    "💡 *Navigation:*\n"
-                    "0️⃣ Main Menu • #️⃣ Exit"
+                response_text = localize(
+                    phone,
+                    "Invalid course number.\n\n💡 *Navigation:*\n0️⃣ Main Menu • #️⃣ Exit",
+                    "Namba y'essomo si ntuufu.\n\n💡 *Navigation:*\n0️⃣ Main Menu • #️⃣ Mala"
                 )
 
         return twiml_message(response_text)
@@ -1323,7 +1775,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
         if user_state[phone] == f"enrolled_{course_id}":
             # 🎯 FIXED: Check if user is logged in
             if phone not in user_moodle_data or 'token' not in user_moodle_data[phone]:
-                response_text = "Please login to access course materials."
+                response_text = localize(phone, "Please login to access course materials.", "Sooka weyingize okufuna ebikozesebwa by'essomo.")
                 return twiml_message(response_text)
             
             # User is logged in - use Moodle system
@@ -1337,10 +1789,10 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 course_name = course_data["name"]
                 
                 if pdfs:
-                    raw_xml = create_moodle_pdf_response(pdfs, course_name)
+                    raw_xml = create_moodle_pdf_response(pdfs, course_name, phone=phone)
                     return Response(content=raw_xml, media_type="application/xml")
                 else:
-                    response_text = "No PDFs available for this course."
+                    response_text = localize(phone, "No PDFs available for this course.", "Tewali PDF ku ssomo lino.")
                     
             elif user_msg == "2":
                 # Get Moodle course contents for videos
@@ -1350,20 +1802,28 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 course_name = course_data["name"]
                 
                 if videos:
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         f"🎥 *{course_name} - Videos*\n\n"
                         f"Found {len(videos)} video(s).\n\n"
                         f"Would you like to:\n"
                         f"1️⃣ Get direct links to videos\n"
                         f"2️⃣ Download and send videos\n\n"
-                        f"9️⃣ Back • 0️⃣ Main Menu"
+                        f"9️⃣ Back • 0️⃣ Main Menu",
+                        f"🎥 *{course_name} - Vidiyo*\n\n"
+                        f"Walabiddwa vidiyo {len(videos)}.\n\n"
+                        f"Oyagala:\n"
+                        f"1️⃣ Okufuna enkolagana za vidiyo\n"
+                        f"2️⃣ Okukka n'okusindika vidiyo\n\n"
+                        f"9️⃣ Ddayo • 0️⃣ Main Menu"
                     )
                     user_state[phone] = f"moodle_videos_{course_id}"
                 else:
-                    response_text = "No videos available for this course."
+                    response_text = localize(phone, "No videos available for this course.", "Tewali vidiyo ku ssomo lino.")
                     
             elif user_msg == "3":
-                response_text = (
+                response_text = localize(
+                    phone,
                     f"📋 *{course_data['name']} - Course Overview*\n\n"
                     f"This course contains:\n"
                     f"• {len(course_data['pdfs'])} PDF study materials\n"
@@ -1372,40 +1832,40 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     "1️⃣ Study Materials (PDFs)\n"
                     "2️⃣ Video Lessons\n\n"
                     "💡 *Navigation:*\n"
-                    "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
+                    "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit",
+                    f"📋 *{course_data['name']} - Okulaba Essomo mu Bufunze*\n\n"
+                    f"Essomo lino lirimu:\n"
+                    f"• {len(course_data['pdfs'])} eby'okuyigira ebya PDF\n"
+                    f"• {len(course_data['videos'])} vidiyo z'okuyigira\n\n"
+                    "Funa ebikozesebwa byo:\n"
+                    "1️⃣ Eby'okuyigira (PDF)\n"
+                    "2️⃣ Vidiyo z'Okuyiga\n\n"
+                    "💡 *Navigation:*\n"
+                    "0️⃣ Main Menu • 9️⃣ Ddayo ku Masomo Gange • #️⃣ Mala"
                 )
                 
             elif user_msg == "9":
                 if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
                     user_state[phone] = "my_courses"
-                    response_text = "↩️ Returning to your enrolled courses..."
+                    response_text = localize(phone, "↩️ Returning to your enrolled courses...", "↩️ Okudda ku masomo go ge nnegattako...")
                 else:
                     user_state[phone] = "browse_courses"
-                    response_text = "↩️ Returning to browse courses..."
+                    response_text = localize(phone, "↩️ Returning to browse courses...", "↩️ Okudda ku kulaba amasomo...")
                     
             elif user_msg in ["0", "menu"]:
                 user_state[phone] = "main_menu"
-                response_text = (
-                    "👋 Welcome back to MoH E-Learning Assistant!\n\n"
-                    "📚 *Available Actions:*\n"
-                    "1️⃣ Browse Courses\n"
-                    "2️⃣ My Enrolled Courses\n"
-                    "3️⃣ Take a Quiz\n"
-                    "4️⃣ View Quiz Results\n"
-                    "5️⃣ Ask Trainer for Help\n"
-                    "6️⃣ Ask Question Q&A\n\n"
-                    "0️⃣ Main Menu • #️⃣ Exit"
-                )
+                response_text = main_menu_text(phone)
                 
             elif user_msg == "#":
-                response_text = "👋 Thank you for using MoH E-Learning Assistant!"
+                response_text = goodbye_text(phone)
                 user_state.pop(phone, None)
+                clear_session_language(phone)
                 
             else:
-                response_text = (
-                    "Please select 1, 2, or 3.\n\n"
-                    "💡 *Navigation:*\n"
-                    "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
+                response_text = localize(
+                    phone,
+                    "Please select 1, 2, or 3.\n\n💡 *Navigation:*\n0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit",
+                    "Londa 1, 2, oba 3.\n\n💡 *Navigation:*\n0️⃣ Main Menu • 9️⃣ Ddayo ku Masomo Gange • #️⃣ Mala"
                 )
             
             return twiml_message(response_text)
@@ -1422,9 +1882,9 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 course_name = course_data["name"]
                 
                 if not videos:
-                    response_text = "No videos available."
+                    response_text = localize(phone, "No videos available.", "Tewali vidiyo ziriwo.")
                 else:
-                    raw_xml = create_video_links_response(videos, course_name)
+                    raw_xml = create_video_links_response(videos, course_name, phone=phone)
                     return Response(content=raw_xml, media_type="application/xml")
                     
             elif user_msg == "2":
@@ -1435,22 +1895,22 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 video_urls = resources.get('videos', [])
                 course_name = course_data["name"]
                 if not video_urls:
-                    response_text = "No videos available for this course."
+                    response_text = localize(phone, "No videos available for this course.", "Tewali vidiyo ku ssomo lino.")
                     return twiml_message(response_text)
 
-                raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, base_url)
+                raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, phone=phone, base_url=base_url)
                 return Response(content=raw_xml, media_type="application/xml")
                 
             elif user_msg == "9":
                 user_state[phone] = f"enrolled_{course_id}"
-                response_text = "↩️ Returning to course options..."
+                response_text = localize(phone, "↩️ Returning to course options...", "↩️ Okudda ku by'oyinza okukola mu ssomo...")
                 
             elif user_msg == "0":
                 user_state[phone] = "main_menu"
-                response_text = "Returning to main menu..."
+                response_text = localize(phone, "Returning to main menu...", "Okudda ku main menu...")
                 
             else:
-                response_text = "Please select 1, 2, or 9."
+                response_text = localize(phone, "Please select 1, 2, or 9.", "Londa 1, 2, oba 9.")
             
             return twiml_message(response_text)
     
@@ -1480,7 +1940,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     if already_enrolled:
                         # User is already enrolled - show course content
                         user_state[phone] = f"enrolled_{course_id}"
-                        response_text = (
+                        response_text = localize(
+                            phone,
                             f"ℹ️ *ALREADY ENROLLED*\n\n"
                             f"You are already enrolled in: *{course_data['name']}*\n\n"
                             f"📊 *Course Overview:*\n"
@@ -1491,7 +1952,18 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                             "2️⃣ Video Lessons\n"
                             "3️⃣ Course Overview\n\n"
                             "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
+                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit",
+                            f"ℹ️ *WEEGASSE DDA*\n\n"
+                            f"Weegasse dda ku: *{course_data['name']}*\n\n"
+                            f"📊 *Okulaba Essomo mu Bufunze:*\n"
+                            f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
+                            f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                            "Oyagala kufunamu ki?\n"
+                            "1️⃣ Eby'okuyigira (PDF)\n"
+                            "2️⃣ Vidiyo z'Okuyiga\n"
+                            "3️⃣ Okulaba Essomo mu Bufunze\n\n"
+                            "💡 *Navigation:*\n"
+                            "0️⃣ Main Menu • 9️⃣ Ddayo ku Kulaba Amasomo • #️⃣ Mala"
                         )
                     else:
                         # Try to enroll
@@ -1519,49 +1991,82 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                                     user_state[phone] = f"enrolled_{course_id}"
                                     
                                     response_text = (
-                                        f"🎉 *ENROLLMENT SUCCESSFUL!* 🎉\n\n"
-                                        f"✅ You are now enrolled in: *{course_data['name']}*\n\n"
-                                        f"📊 *Course Overview:*\n"
-                                        f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
-                                        f"• {len(course_data.get('videos', []))} Video Resources\n\n"
-                                        "What would you like to access first?\n"
-                                        "1️⃣ Study Materials (PDFs)\n"
-                                        "2️⃣ Video Lessons\n"
-                                        "3️⃣ Course Overview\n\n"
-                                        "💡 *Navigation:*\n"
-                                        "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
+                                        localize(
+                                            phone,
+                                            f"🎉 *ENROLLMENT SUCCESSFUL!* 🎉\n\n"
+                                            f"✅ You are now enrolled in: *{course_data['name']}*\n\n"
+                                            f"📊 *Course Overview:*\n"
+                                            f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
+                                            f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                                            "What would you like to access first?\n"
+                                            "1️⃣ Study Materials (PDFs)\n"
+                                            "2️⃣ Video Lessons\n"
+                                            "3️⃣ Course Overview\n\n"
+                                            "💡 *Navigation:*\n"
+                                            "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit",
+                                            f"🎉 *OKWEGATTA KUYISE BULUNGI!* 🎉\n\n"
+                                            f"✅ Kaakano weegasse ku: *{course_data['name']}*\n\n"
+                                            f"📊 *Okulaba Essomo mu Bufunze:*\n"
+                                            f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
+                                            f"• {len(course_data.get('videos', []))} Video Resources\n\n"
+                                            "Oyagala kutandika na ki?\n"
+                                            "1️⃣ Eby'okuyigira (PDF)\n"
+                                            "2️⃣ Vidiyo z'Okuyiga\n"
+                                            "3️⃣ Okulaba Essomo mu Bufunze\n\n"
+                                            "💡 *Navigation:*\n"
+                                            "0️⃣ Main Menu • 9️⃣ Ddayo ku Masomo Gange • #️⃣ Mala"
+                                        )
                                     )
                                 else:
                                     # Enrollment didn't stick
-                                    response_text = (
+                                    response_text = localize(
+                                        phone,
                                         f"⚠️ *ENROLLMENT PENDING*\n\n"
                                         f"Enrollment in '{course_data['name']}' was submitted but not yet confirmed.\n\n"
                                         f"This can happen if:\n"
                                         f"• Moodle is processing your request\n"
                                         f"• There's a delay in the system\n\n"
-                                        f"Please wait a few minutes and check 'My Enrolled Courses' again."
+                                        f"Please wait a few minutes and check 'My Enrolled Courses' again.",
+                                        f"⚠️ *OKWEGATTA KUKYALI KULINDIRWA*\n\n"
+                                        f"Okwegatta ku '{course_data['name']}' kwasindikiddwa naye tekunnakakasibwa.\n\n"
+                                        f"Kino kiyinza okubaawo singa:\n"
+                                        f"• Moodle ekyakola ku kusaba kwo\n"
+                                        f"• Waliwo okulwawo mu sisitemu\n\n"
+                                        f"Lindako katono oddemu olabe 'Amasomo Gange Ge Nnegattako'."
                                     )
                                     user_state[phone] = "browse_courses"
                                     
                             except Exception as e:
                                 print(f"Failed to verify enrollment: {e}")
-                                response_text = (
+                                response_text = localize(
+                                    phone,
                                     f"⚠️ *ENROLLMENT SUBMITTED*\n\n"
                                     f"Enrollment in '{course_data['name']}' was submitted.\n\n"
-                                    f"Please check 'My Enrolled Courses' in a few moments to confirm."
+                                    f"Please check 'My Enrolled Courses' in a few moments to confirm.",
+                                    f"⚠️ *OKWEGATTA KWASINDIKIDDWA*\n\n"
+                                    f"Okwegatta ku '{course_data['name']}' kwasindikiddwa.\n\n"
+                                    f"Ddamu olabe 'Amasomo Gange Ge Nnegattako' mu kaseera katono okukakasa."
                                 )
                                 user_state[phone] = "browse_courses"
                             
                         else:
                             # Enrollment API call failed
-                            response_text = (
+                            response_text = localize(
+                                phone,
                                 f"*ENROLLMENT FAILED*\n\n"
                                 f"Could not enroll in: {course_data['name']}\n\n"
                                 f"This might be because:\n"
                                 f"• The course is full\n"
                                 f"• Enrollment is restricted\n"
                                 f"• Technical error with Moodle\n\n"
-                                f"Please try another course or contact support."
+                                f"Please try another course or contact support.",
+                                f"*OKWEGATTA KULEMYE*\n\n"
+                                f"Tetusobodde kukwegatta ku: {course_data['name']}\n\n"
+                                f"Kiyinza okuba nga:\n"
+                                f"• Essomo lijjudde\n"
+                                f"• Okwegatta kukugiddwa\n"
+                                f"• Wabaddewo ensobi ya Moodle\n\n"
+                                f"Gezaako essomo eddala oba otuukirire abayambi."
                             )
                 else:
                     # User not logged in - prompt for Moodle login
@@ -1576,40 +2081,35 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     
                     # Ask for Moodle username
                     user_state[phone] = "moodle_username"
-                    response_text = (
+                    response_text = localize(
+                        phone,
                         f"🔐 *Moodle Login Required*\n\n"
                         f"To enroll in '{course_data['name']}', you need to login to Moodle.\n\n"
-                        "Please enter your Moodle username:"
+                        "Please enter your Moodle username:",
+                        f"🔐 *Okweyingiza ku Moodle Kwetaagisa*\n\n"
+                        f"Okweegatta ku '{course_data['name']}', olina okusooka okweyingiza ku Moodle.\n\n"
+                        "Wandiika erinnya lyo ery'okweyingiza ku Moodle:"
                     )   
             
             elif user_msg == "9":
                 # Back to course selection
                 user_state[phone] = "browse_courses"
-                response_text = "↩️ Returning to browse courses..."
+                response_text = localize(phone, "↩️ Returning to browse courses...", "↩️ Okudda ku kulaba amasomo...")
                 
             elif user_msg in ["0", "menu"]:
                 user_state[phone] = "main_menu"
-                response_text = (
-                    "👋 Welcome back to MoH E-Learning Assistant!\n\n"
-                    "📚 *Available Actions:*\n"
-                    "1️⃣ Browse Courses\n"
-                    "2️⃣ My Enrolled Courses\n"
-                    "3️⃣ Take a Quiz\n"
-                    "4️⃣ View Quiz Results\n"
-                    "5️⃣ Ask Trainer for Help\n"
-                    "6️⃣ Ask Question Q&A\n\n"
-                    "0️⃣ Main Menu • #️⃣ Exit"
-                )
+                response_text = main_menu_text(phone)
                 
             elif user_msg == "#":
-                response_text = "👋 Thank you for using MoH E-Learning Assistant!"
+                response_text = goodbye_text(phone)
                 user_state.pop(phone, None)
+                clear_session_language(phone)
                 
             else:
-                response_text = (
-                    "Please select 3 to enroll or use navigation options.\n\n"
-                    "💡 *Navigation:*\n"
-                    "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
+                response_text = localize(
+                    phone,
+                    "Please select 1 to enroll or use navigation options.\n\n💡 *Navigation:*\n0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit",
+                    "Londa 1 okweegatta oba kozesa navigation options.\n\n💡 *Navigation:*\n0️⃣ Main Menu • 9️⃣ Ddayo ku Kulaba Amasomo • #️⃣ Mala"
                 )
             
             return twiml_message(response_text)
@@ -1617,7 +2117,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     # ====== FALLBACK FOR UNKNOWN SESSION STATES ======
     user_state[phone] = "main_menu"
     return twiml_message(
-        "⚠️ Session state was reset.\n\n" + main_menu_text()
+        localize(phone, "⚠️ Session state was reset.\n\n", "⚠️ Embeera ya session ezziddwawo.\n\n") + main_menu_text(phone)
     )
 # Additional WhatsApp endpoints
 @router.get("/status")

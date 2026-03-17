@@ -51,6 +51,7 @@ class api extends external_api {
                 'source_type' => new external_value(PARAM_TEXT, 'Source type', VALUE_OPTIONAL),
                 'url' => new external_value(PARAM_TEXT, 'Source URL', VALUE_OPTIONAL),
                 'course_id' => new external_value(PARAM_TEXT, 'Course identifier', VALUE_OPTIONAL),
+                'moodle_cmid' => new external_value(PARAM_TEXT, 'Moodle course module identifier', VALUE_OPTIONAL),
             ])
         );
     }
@@ -148,6 +149,7 @@ class api extends external_api {
                 'source_type' => new external_value(PARAM_TEXT, 'Source type', VALUE_OPTIONAL),
                 'url' => new external_value(PARAM_TEXT, 'Source URL', VALUE_OPTIONAL),
                 'course_id' => new external_value(PARAM_TEXT, 'Course identifier', VALUE_OPTIONAL),
+                'moodle_cmid' => new external_value(PARAM_TEXT, 'Moodle course module identifier', VALUE_OPTIONAL),
             ]),
             'chunks_indexed' => new external_value(PARAM_INT, 'Number of chunks indexed'),
         ]);
@@ -352,6 +354,7 @@ class api extends external_api {
         $payload->contextprompt = $instance->contextprompt ?? '';
         $payload->allowuploads = (bool)($instance->allowuploads ?? 0);
         $payload->allowedmimetypes = $instance->allowedmimetypes ?? '';
+        $payload->documentscope = $instance->documentscope ?? 'enrolledcourses';
         $payload->allowedcourseids = self::resolve_allowed_course_ids($instance, $courseid, $context);
         $payload->allowedsourcetypes = self::resolve_allowed_source_types($instance);
         $payload->includeglobaldocs = !empty($instance->allowglobaldocs);
@@ -408,11 +411,20 @@ class api extends external_api {
         $allowedcourseids = array_map('strval', $payload->allowedcourseids ?? []);
         $allowedsourcetypes = array_map('strtolower', $payload->allowedsourcetypes ?? []);
         $includeglobaldocs = !empty($payload->includeglobaldocs);
+        $documentscope = strtolower((string)($payload->documentscope ?? 'enrolledcourses'));
+        $activitycmid = (string)($payload->cmid ?? '');
 
-        return array_values(array_filter($documents, function(array $document) use ($allowedcourseids, $allowedsourcetypes, $includeglobaldocs): bool {
+        return array_values(array_filter($documents, function(array $document) use ($allowedcourseids, $allowedsourcetypes, $includeglobaldocs, $documentscope, $activitycmid): bool {
             $sourcetype = strtolower((string)($document['source_type'] ?? 'pdf'));
             if (!empty($allowedsourcetypes) && !in_array($sourcetype, $allowedsourcetypes, true)) {
                 return false;
+            }
+
+            if ($documentscope === 'currentcourse' && $activitycmid !== '') {
+                $documentcmid = (string)($document['moodle_cmid'] ?? '');
+                if ($documentcmid === '' || $documentcmid !== $activitycmid) {
+                    return false;
+                }
             }
 
             $courseid = $document['course_id'] ?? null;

@@ -83,6 +83,7 @@ def _build_chunk_payload(
     source_type: str,
     course_id: Optional[str] = None,
     external_ref: Optional[str] = None,
+    moodle_cmid: Optional[str] = None,
 ) -> Tuple[List[str], List[dict], List[str]]:
     texts: List[str] = []
     metadatas: List[dict] = []
@@ -117,6 +118,8 @@ def _build_chunk_payload(
                 metadata["course_id"] = course_id
             if external_ref:
                 metadata["external_ref"] = external_ref
+            if moodle_cmid:
+                metadata["moodle_cmid"] = moodle_cmid
             metadatas.append(metadata)
             ids.append(chunk_id)
     return texts, metadatas, ids
@@ -267,7 +270,8 @@ def _build_web_chunk_payload(
     text: str,
     chunk_size: int,
     chunk_overlap: int,
-    course_id: Optional[str] = None
+    course_id: Optional[str] = None,
+    moodle_cmid: Optional[str] = None,
 ) -> Tuple[List[str], List[dict], List[str]]:
     chunks = _chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     texts: List[str] = []
@@ -299,6 +303,8 @@ def _build_web_chunk_payload(
         }
         if course_id:
             metadata["course_id"] = course_id
+        if moodle_cmid:
+            metadata["moodle_cmid"] = moodle_cmid
         metadatas.append(metadata)
         ids.append(chunk_id)
 
@@ -312,13 +318,14 @@ def ingest_document(
     course_id: Optional[str] = None,
     source_type_hint: Optional[str] = None,
     external_ref: Optional[str] = None,
+    moodle_cmid: Optional[str] = None,
 ) -> UploadResponse:
     settings: Settings = get_settings()
     document_store = DocumentStore(settings.chroma_path)
     collection = get_collection()
 
     if external_ref:
-        existing = document_store.find_by_external_ref(external_ref)
+        existing = document_store.find_by_external_ref(external_ref, moodle_cmid=moodle_cmid)
         if existing:
             return UploadResponse(document=existing, chunks_indexed=0)
 
@@ -353,6 +360,7 @@ def ingest_document(
         source_type=source_type,
         course_id=course_id,
         external_ref=external_ref,
+        moodle_cmid=moodle_cmid,
     )
 
     if not texts:
@@ -376,13 +384,18 @@ def ingest_document(
         url=None,
         course_id=course_id,
         external_ref=external_ref,
+        moodle_cmid=moodle_cmid,
     )
     document_store.upsert(summary)
 
     return UploadResponse(document=summary, chunks_indexed=len(texts))
 
 
-def ingest_web_page(url: str,course_id: Optional[str] = None) -> UploadResponse:
+def ingest_web_page(
+    url: str,
+    course_id: Optional[str] = None,
+    moodle_cmid: Optional[str] = None,
+) -> UploadResponse:
     settings: Settings = get_settings()
     document_store = DocumentStore(settings.chroma_path)
     collection = get_collection()
@@ -405,7 +418,8 @@ def ingest_web_page(url: str,course_id: Optional[str] = None) -> UploadResponse:
         text=text,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
-        course_id=course_id 
+        course_id=course_id,
+        moodle_cmid=moodle_cmid,
     )
 
     if not texts:
@@ -427,7 +441,8 @@ def ingest_web_page(url: str,course_id: Optional[str] = None) -> UploadResponse:
         page_count=len(texts),
         source_type="web",
         url=url,
-        course_id=course_id
+        course_id=course_id,
+        moodle_cmid=moodle_cmid,
     )
     document_store.upsert(summary)
 
