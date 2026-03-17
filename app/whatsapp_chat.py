@@ -508,7 +508,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
     if phone not in user_state:
         user_state[phone] = "main_menu"
         response_text = (
-            "👋 Hello! Welcome to the MoH E-Learning Assistant!\n\n"
+            "👋 join company-tears\n\n"
             "📚 *Available Actions:*\n"
             "1️⃣ Enroll in a course\n"
             "2️⃣ Browse available courses\n"
