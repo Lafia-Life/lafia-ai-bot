@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 from enum import Enum
 
 
@@ -56,6 +56,7 @@ class DocumentSummary(BaseModel):
     url: Optional[str] = None
     course_id: Optional[str] = None
     external_ref: Optional[str] = None
+    moodle_cmid: Optional[str] = None
 
 
 class UploadResponse(BaseModel):
@@ -110,6 +111,16 @@ class ChatRequest(BaseModel):
     allowed_course_ids: Optional[List[str]] = None
     allowed_source_types: Optional[List[str]] = None
     include_global_docs: bool = False
+    document_scope: Optional[str] = None
+    moodle_cmid: Optional[str] = None
+
+    @field_validator("moodle_cmid", mode="before")
+    @classmethod
+    def normalize_moodle_cmid(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
 
 class Citation(BaseModel):
@@ -135,6 +146,8 @@ class ChatResponse(BaseModel):
 # -----------------------------
 class ScrapeRequest(BaseModel):
     url: HttpUrl
+    course_id: Optional[str] = None
+    moodle_cmid: Optional[str] = None
 
 
 # -----------------------------

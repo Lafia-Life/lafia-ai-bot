@@ -63,6 +63,20 @@
   background: var(--mohchat-bg);
   min-width: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 68vh;
+}
+
+.mod-chatlearning .documents-panel .panel-header {
+  align-items: center;
+}
+
+.mod-chatlearning .document-sync-button {
+  font-size: 0.78rem;
+  padding: 0.45rem 0.72rem;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 
 .mod-chatlearning .document-list {
@@ -72,6 +86,10 @@
   display: grid;
   gap: 0.55rem;
   min-width: 0;
+  min-height: 0;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 0.2rem;
 }
 
 .mod-chatlearning .document-list li {
@@ -427,6 +445,14 @@
 @media (max-width: 1200px) {
   .mod-chatlearning .chat-workspace {
     grid-template-columns: 1fr;
+  }
+
+  .mod-chatlearning .documents-panel {
+    min-height: 0;
+  }
+
+  .mod-chatlearning .document-list {
+    max-height: 44vh;
   }
 
   .mod-chatlearning .conversation-panel {

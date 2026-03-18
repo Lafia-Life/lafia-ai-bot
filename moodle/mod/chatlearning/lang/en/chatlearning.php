@@ -40,6 +40,7 @@ $string['capability:addinstance'] = 'Add a new ChatLearning activity';
 $string['label:documents'] = 'Indexed documents';
 $string['label:chat'] = 'Ask a question';
 $string['label:references'] = 'Supporting references';
+$string['label:syncdocs'] = 'Sync docs';
 $string['label:uploads'] = 'Upload documents';
 $string['label:scrape'] = 'Add URL';
 $string['label:syncmoodle'] = 'Sync from Moodle';

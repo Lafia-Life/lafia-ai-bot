@@ -35,6 +35,9 @@ class client {
         if (!empty($context->allowedsourcetypes) && is_array($context->allowedsourcetypes)) {
             $params['source_type'] = array_values($context->allowedsourcetypes);
         }
+        if (($context->documentscope ?? '') === 'currentcourse') {
+            $params['moodle_cmid'] = (string)$context->cmid;
+        }
         $response = $this->request('get', '/api/documents', $params);
         return $response['documents'] ?? $response;
     }
@@ -185,13 +188,14 @@ class client {
     private function build_context_params(stdClass $context): array {
         $params = [
             'moodle_course_id' => $context->courseid,
-            'moodle_cmid' => $context->cmid,
+            'moodle_cmid' => (string)$context->cmid,
             'moodle_user_id' => $context->userid,
             'moodle_username' => $context->username,
             'moodle_fullname' => $context->fullname,
             'chatlearning_instance' => $context->instanceid,
             'course_id' => (string)$context->courseid,
             'include_global_docs' => !empty($context->includeglobaldocs),
+            'document_scope' => $context->documentscope ?? 'enrolledcourses',
         ];
         if (!empty($context->allowedcourseids) && is_array($context->allowedcourseids)) {
             $params['allowed_course_ids'] = array_map('strval', array_values($context->allowedcourseids));

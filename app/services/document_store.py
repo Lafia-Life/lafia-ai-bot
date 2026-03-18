@@ -34,12 +34,16 @@ class DocumentStore:
         record = data.get(document_id)
         return DocumentSummary(**record) if record else None
 
-    def find_by_external_ref(self, external_ref: str) -> Optional[DocumentSummary]:
+    def find_by_external_ref(self, external_ref: str, moodle_cmid: Optional[str] = None) -> Optional[DocumentSummary]:
         if not external_ref:
             return None
         data = self._read()
+        target_cmid = (moodle_cmid or "").strip()
         for record in data.values():
             if record.get("external_ref") == external_ref:
+                record_cmid = str(record.get("moodle_cmid") or "").strip()
+                if target_cmid and record_cmid != target_cmid:
+                    continue
                 return DocumentSummary(**record)
         return None
 

@@ -5,6 +5,9 @@
       <aside class="panel documents-panel" data-panel="documents">
         <header class="panel-header">
           <h2>{{#str}}label:documents, mod_chatlearning{{/str}}</h2>
+          {{#allowmoodlesync}}
+          <button type="button" class="secondary document-sync-button" data-document-sync>{{#str}}label:syncdocs, mod_chatlearning{{/str}}</button>
+          {{/allowmoodlesync}}
         </header>
         <ul class="document-list" data-document-list></ul>
         <p class="status" data-document-status></p>

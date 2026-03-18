@@ -165,6 +165,8 @@ def _filter_results(raw_results: List[dict], payload: ChatRequest, limit: int = 
     allowed_source_types = _normalize_str_list(payload.allowed_source_types)
     allowed_course_ids = _normalize_course_list(payload.allowed_course_ids)
     include_global_docs = bool(payload.include_global_docs)
+    document_scope = str(payload.document_scope or "").strip().lower()
+    scoped_moodle_cmid = str(payload.moodle_cmid or "").strip()
 
     filtered: List[dict] = []
     for result in raw_results:
@@ -172,6 +174,11 @@ def _filter_results(raw_results: List[dict], payload: ChatRequest, limit: int = 
         source_type = str(metadata.get("source_type", "pdf")).strip().lower()
         if allowed_source_types and source_type not in allowed_source_types:
             continue
+
+        if document_scope == "currentcourse" and scoped_moodle_cmid:
+            metadata_cmid = str(metadata.get("moodle_cmid") or "").strip()
+            if metadata_cmid != scoped_moodle_cmid:
+                continue
 
         course_id = metadata.get("course_id")
         if allowed_course_ids:

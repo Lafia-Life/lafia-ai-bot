@@ -115,6 +115,7 @@ def sms_admin_page(request: Request) -> HTMLResponse:
 def list_documents(
     course_id: Optional[List[str]] = Query(None),
     source_type: Optional[List[str]] = Query(None),
+    moodle_cmid: Optional[List[str]] = Query(None),
     include_global: bool = Query(True),
     store: DocumentStore = Depends(get_document_store),
 ) -> list[DocumentSummary]:
@@ -122,11 +123,16 @@ def list_documents(
 
     allowed_courses = {str(item).strip() for item in (course_id or []) if str(item).strip()}
     allowed_sources = {str(item).strip().lower() for item in (source_type or []) if str(item).strip()}
+    allowed_cmids = {str(item).strip() for item in (moodle_cmid or []) if str(item).strip()}
 
     filtered: list[DocumentSummary] = []
     for doc in documents:
         doc_source = (doc.source_type or "").strip().lower()
         if allowed_sources and doc_source not in allowed_sources:
+            continue
+
+        doc_cmid = (doc.moodle_cmid or "").strip()
+        if allowed_cmids and doc_cmid not in allowed_cmids:
             continue
 
         doc_course = (doc.course_id or "").strip()
@@ -145,6 +151,7 @@ def list_documents(
 def upload_document(
     file: UploadFile = File(...),
     course_id: Optional[str] = Form(None),
+    moodle_cmid: Optional[str] = Form(None),
     source_type_hint: Optional[str] = Form(None),
     external_ref: Optional[str] = Form(None),
 ) -> UploadResponse:
@@ -157,6 +164,7 @@ def upload_document(
         filename=file.filename,
         content_type=file.content_type,
         course_id=course_id,  # Pass course_id to your ingest function
+        moodle_cmid=moodle_cmid,
         source_type_hint=source_type_hint,
         external_ref=external_ref,
     )
@@ -186,7 +194,11 @@ def delete_document_compat(document_id: str, store: DocumentStore = Depends(get_
 @app.post("/api/scrape", response_model=UploadResponse)
 def scrape_document(payload: ScrapeRequest) -> UploadResponse:
     try:
-        return ingest_web_page(str(payload.url))
+        return ingest_web_page(
+            str(payload.url),
+            course_id=payload.course_id,
+            moodle_cmid=payload.moodle_cmid,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

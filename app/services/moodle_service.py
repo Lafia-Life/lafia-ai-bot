@@ -19,6 +19,29 @@ courses_cache_timestamp = 0
 MOODLE_BASE_URL = os.getenv("MOODLE_BASE_URL")
 MOODLE_TOKEN = os.getenv("MOODLE_TOKEN")
 
+
+def _set_last_course_sync_error(code: str, message: str):
+    global _last_course_sync_error
+    with cache_lock:
+        _last_course_sync_error = {
+            "code": code,
+            "message": message,
+            "timestamp": time.time(),
+        }
+
+
+def _clear_last_course_sync_error():
+    global _last_course_sync_error
+    with cache_lock:
+        _last_course_sync_error = None
+
+
+def get_last_course_sync_error():
+    with cache_lock:
+        if not _last_course_sync_error:
+            return None
+        return _last_course_sync_error.copy()
+
 def get_moodle_courses():
     """Fetch courses from Moodle API"""
     url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
@@ -51,12 +74,15 @@ def get_moodle_courses():
         return courses_dict  
     
     except requests.exceptions.RequestException as e:
+        _set_last_course_sync_error("network_error", str(e))
         print(f"❌ Network error fetching Moodle courses: {e}")
         return {}
     except ValueError as e:
+        _set_last_course_sync_error("json_error", str(e))
         print(f"❌ JSON parsing error from Moodle API: {e}")
         return {}
     except Exception as e:
+        _set_last_course_sync_error("unexpected_error", str(e))
         print(f"❌ Unexpected error fetching Moodle courses: {e}")
         return {}
 
