@@ -1,7 +1,9 @@
+from dotenv import load_dotenv
 import token
 from urllib.parse import quote, urlparse, parse_qs, urlencode
 import hashlib
 import os
+import mimetypes
 import json
 import subprocess
 import tempfile
@@ -13,6 +15,8 @@ from fastapi import APIRouter, Form, Response, HTTPException, Query, Request,Fas
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
+from app.schemas import ChatRequest
+from app.services.retrieval import answer_question
 from datetime import datetime 
 from app.services.document_store import DocumentStore
 from app.services.video_store import VideoStore
@@ -23,7 +27,8 @@ import asyncio
 import threading
 from app.services.moodle_service import (
     get_available_courses, 
-    preload_courses_background,
+    clear_courses_cache,
+    start_preload_worker,
     normalize_moodle_file_url,
     authenticate_moodle_user,
     get_user_enrolled_courses_moodle,
@@ -33,9 +38,14 @@ from app.services.moodle_service import (
     enroll_user_in_course,
     get_moodle_user_id,
     is_user_enrolled_in_course,
+    create_generic_content_response,  # Add this
+    create_course_overview,           # Add this
+    format_file_size,                 # Add this
+    categorize_file                   # Add this
 )
 from urllib.parse import quote, unquote, urlparse
 import urllib3
+load_dotenv()
 
 # Create router instead of app
 router = APIRouter()
@@ -54,10 +64,11 @@ courses_cache_timestamp = 0
 CACHE_DURATION = 300  # 5 minutes
 
 # ====== NEW: MOODLE USER AUTHENTICATION STORAGE ======
-user_moodle_data = {}  # phone -> {token, userid, username, enrolled_courses, etc}
+user_moodle_data = {} 
 
 # Disable SSL warnings for Moodle
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+BASE_URL = os.getenv("BASE_URL")
 
 def escape_xml(text: str) -> str:
     return (text.replace('&', '&amp;')
@@ -65,6 +76,23 @@ def escape_xml(text: str) -> str:
                .replace('>', '&gt;')
                .replace('"', '&quot;')
                .replace("'", '&apos;'))
+
+
+def twiml_message(text: str = "") -> Response:
+    escaped_text = escape_xml(text or "")
+    if escaped_text:
+        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+    else:
+        raw_xml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
+    return Response(content=raw_xml, media_type="application/xml")
+
+
+def normalize_phone_key(from_value: str) -> str:
+    """Normalize sender IDs so session state is stable across provider formats."""
+    value = (from_value or "").strip().lower()
+    if value.startswith("whatsapp:"):
+        value = value.split(":", 1)[1]
+    return value
 
 
 def get_document_file_path(document_id: str):
@@ -231,30 +259,30 @@ def serve_video(filename: str):
     """
     Serve a locally downloaded Moodle video to WhatsApp
     """
-    file_path = Path("videos") / filename
-    # file_path = os.path.join("videos", filename)
-
+    safe_filename = os.path.basename(filename)
+    file_path = Path("storage/uploads/videos") / safe_filename
     if not os.path.exists(file_path):
+        print(f"❌ Video not found for serving: {file_path}")
         raise HTTPException(status_code=404, detail="Video not found")
 
-    def iterfile():
-        with open(file_path, "rb") as f:
-            while chunk := f.read(1024 * 1024):
-                yield chunk
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    media_type = mime_type or "application/octet-stream"
+    file_size = os.path.getsize(file_path)
+    print(f"✅ Serving video: {safe_filename} ({file_size} bytes, {media_type})")
 
-    return StreamingResponse(
-        iterfile(),
-        media_type="video/mp4",
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        filename=safe_filename,
         headers={
-            "Content-Type": "video/mp4",
             "Content-Disposition": "inline",
-            "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=86400",
             "Access-Control-Allow-Origin": "*",
         }
     )
 
-def create_smart_video_response(video_urls, course_name, course_id, token, base_url: str = "https://fd9e-41-75-172-172.ngrok-free.app"):
+def create_smart_video_response(video_urls, course_name, course_id, token, base_url: str = BASE_URL):
+    # "https://elearning.cadh.africa"
     """Download videos and serve them DIRECTLY in WhatsApp messages"""
 
     if not video_urls:
@@ -280,7 +308,7 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
         if video_url:
             try:
                 # Download the video to our server
-                local_path = download_and_store_video(video_url, course_id, video_title,token)
+                local_path = download_and_store_video(video_url, course_id, video_title, token)
                 
                 if local_path:
                     # Get the filename for our server URL
@@ -302,9 +330,12 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
                 traceback.print_exc()
     
     if not downloaded_videos:
-        response_text = "Could not download any videos. Please try again later."
-        escaped_text = escape_xml(response_text)
-        return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+        # Fall back to plain direct links when media download/attach is blocked.
+        return create_video_links_response(
+            video_urls,
+            course_name,
+            note="Could not download videos to WhatsApp right now. Sharing direct links instead."
+        )
     
     # Now send the videos to WhatsApp
     videos_header = f'''<Message>
@@ -324,12 +355,67 @@ def create_smart_video_response(video_urls, course_name, course_id, token, base_
         
         message_xml = f"""
         <Message>
-            <Media>{escape_xml(video_url)}</Media>
             <Body>🎥 {escape_xml(video_title)}</Body>
+            <Media>{escape_xml(video_url)}</Media>
         </Message>
         """
         messages_xml.append(message_xml)
     
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+{"".join(messages_xml)}
+</Response>'''
+
+
+def create_video_links_response(videos, course_name, note: str = ""):
+    """Return direct video URLs as text messages (works even when media delivery fails)."""
+    if not videos:
+        response_text = "No videos available for this course."
+        escaped_text = escape_xml(response_text)
+        return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+
+    messages_xml = []
+
+    header_text = f"🔗 {course_name} - Video Links"
+    if note:
+        header_text = f"{header_text}\n\n⚠️ {note}"
+    messages_xml.append(
+        f'''<Message>
+        <Body>{escape_xml(header_text)}</Body>
+    </Message>'''
+    )
+
+    sent = 0
+    for i, video in enumerate(videos, start=1):
+        video_url = (video or {}).get("url", "")
+        if not video_url:
+            continue
+        video_title = (video or {}).get("title", "Video")
+        body = f"🎥 {i}. {video_title}\n{video_url}"
+        messages_xml.append(
+            f'''<Message>
+            <Body>{escape_xml(body)}</Body>
+        </Message>'''
+        )
+        sent += 1
+        if sent >= 5:
+            break
+
+    total_with_urls = sum(1 for item in videos if (item or {}).get("url"))
+    if total_with_urls > sent:
+        remaining = total_with_urls - sent
+        messages_xml.append(
+            f'''<Message>
+            <Body>{escape_xml(f"... and {remaining} more video link(s).")}</Body>
+        </Message>'''
+        )
+
+    messages_xml.append(
+        '''<Message>
+        <Body>💡 Open any link in your browser.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu</Body>
+    </Message>'''
+    )
+
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <Response>
 {"".join(messages_xml)}
@@ -343,72 +429,97 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
     Download Moodle video - USING THE WORKING APPROACH FROM test_sample.py
     """
     try:
-        
-        # Use the exact same logic as test_sample.py
+        max_video_bytes = int(os.getenv("WHATSAPP_MAX_VIDEO_BYTES", str(15 * 1024 * 1024)))
         parsed = urlparse(moodle_url)
-        query_params = parse_qs(parsed.query)
-        
-        # Add token - SIMPLE, don't remove existing
+        normalized_path = parsed.path or ""
+        if "/webservice/pluginfile.php/" not in normalized_path and "/pluginfile.php/" in normalized_path:
+            normalized_path = normalized_path.replace("/pluginfile.php/", "/webservice/pluginfile.php/", 1)
+            moodle_url = parsed._replace(path=normalized_path).geturl()
+            parsed = urlparse(moodle_url)
+
+        # Try the logged-in user's token first, then fallback token if available.
+        fallback_token = os.getenv("MOODLE_TOKEN")
+        token_candidates = []
         if token:
-            query_params['token'] = [token]
-        
-        # Ensure forcedownload
-        query_params['forcedownload'] = ['1']
-        
-        # Rebuild URL
-        new_query = urlencode(query_params, doseq=True)
-        download_url = parsed._replace(query=new_query).geturl()
-                
-        # Use same headers as test_sample.py
+            token_candidates.append(token)
+        if fallback_token and fallback_token not in token_candidates:
+            token_candidates.append(fallback_token)
+        if not token_candidates:
+            token_candidates.append(None)
+
         headers = {
             'User-Agent': 'Mozilla/5.0',
             'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
             'Referer': 'https://elearning.cadh.africa/',
         }
-        
-        response = requests.head(download_url, headers=headers, verify=False, timeout=10)
-        
-        if response.status_code != 200:
-            print(f"Cannot access video")
-            return None
-        
-        # Now download
-        print("\nDownloading...")
-        get_response = requests.get(download_url, headers=headers, stream=True, timeout=60, verify=False)
-        
-        if get_response.status_code == 200:
-            # Check if it's actually a video
+
+        videos_dir = Path("storage/uploads/videos")
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        safe_title = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in video_title)
+        source_ext = Path(parsed.path or "").suffix.lower()
+        if source_ext not in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv", ".flv", ".3gp"}:
+            source_ext = ".mp4"
+        filename = f"course_{course_id}_{safe_title}{source_ext}"
+        local_path = videos_dir / filename
+
+        for token_candidate in token_candidates:
+            query_params = parse_qs(parsed.query)
+            if token_candidate:
+                query_params['token'] = [token_candidate]
+            query_params['forcedownload'] = ['1']
+            download_url = parsed._replace(query=urlencode(query_params, doseq=True)).geturl()
+
+            try:
+                head_response = requests.head(
+                    download_url,
+                    headers=headers,
+                    verify=False,
+                    timeout=10,
+                    allow_redirects=True
+                )
+                if head_response.status_code >= 400:
+                    print(f"HEAD check failed ({head_response.status_code}), trying GET anyway...")
+                content_length = int(head_response.headers.get("content-length") or 0)
+                if content_length and content_length > max_video_bytes:
+                    print(f"Video too large for WhatsApp ({content_length} bytes), skipping")
+                    continue
+            except requests.RequestException as head_error:
+                print(f"HEAD check error ({head_error}), trying GET anyway...")
+
+            print("\nDownloading...")
+            get_response = requests.get(download_url, headers=headers, stream=True, timeout=60, verify=False)
+            if get_response.status_code != 200:
+                print(f"Video download failed (GET {get_response.status_code})")
+                continue
+
             content_type = get_response.headers.get("content-type", "").lower()
-            if "video" not in content_type and "octet-stream" not in content_type:                
-                # Check first bytes
-                sample = get_response.content[:100]
-                print(f"📄 First 100 bytes: {sample}")
-                
-                return None
-            
-            # Save file
-            videos_dir = Path("videos")  # Changed from "storage/uploads/videos"
-            videos_dir.mkdir(parents=True, exist_ok=True)
-            
-            filename = f"course_{course_id}_{video_title.replace(' ', '_')}.mp4"
-            local_path = videos_dir / filename
-            
+            if "video" not in content_type and "octet-stream" not in content_type:
+                sample = next(get_response.iter_content(200), b"")
+                print(f"📄 Non-video response: {sample[:120]}")
+                continue
+
             downloaded = 0
             with open(local_path, "wb") as f:
                 for chunk in get_response.iter_content(8192):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        
+                        if downloaded > max_video_bytes:
+                            print(f"Downloaded file exceeded WhatsApp limit ({downloaded} bytes), skipping")
+                            break
+
             if downloaded < 1000:
                 print("File too small")
                 local_path.unlink(missing_ok=True)
-                return None
-            
+                continue
+            if downloaded > max_video_bytes:
+                local_path.unlink(missing_ok=True)
+                continue
+
             return str(local_path)
-        
+
         return None
-        
+
     except Exception as e:
         print(f"Video download error: {e}")
         import traceback
@@ -460,7 +571,8 @@ async def handle_moodle_login_flow(phone, raw_msg):
 
     # ===== USERNAME STEP =====
     if state == "moodle_username":
-        user_moodle_data[phone]["username"] = raw_msg
+        user_moodle_data.setdefault(phone, {})
+        user_moodle_data[phone]["username"] = raw_msg.strip()
         user_state[phone] = "moodle_password"
 
         response_text = (
@@ -473,7 +585,16 @@ async def handle_moodle_login_flow(phone, raw_msg):
 
     # ===== PASSWORD STEP =====
     if state == "moodle_password":
-        username = user_moodle_data[phone]["username"]
+        username = user_moodle_data.get(phone, {}).get("username")
+        if not username:
+            user_state[phone] = "moodle_username"
+            response_text = (
+                "🔐 *Login Required*\n\n"
+                "Please enter your Moodle username:"
+            )
+            escaped_text = escape_xml(response_text)
+            raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+            return Response(content=raw_xml, media_type="application/xml")
         password = raw_msg  # RAW, NOT lowercased
 
         auth_result = authenticate_moodle_user(username, password)
@@ -583,23 +704,31 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 user_moodle_data[phone].pop('original_intent', None)
                 
                 if is_enrolled:
-                    # User IS enrolled - show course content menu
                     user_state[phone] = f"enrolled_{course_id}"
-                    response_text = (
-                        f"🎓 *{course_data['name']}*\n\n"
-                        f"✅ *Status:* You are already enrolled\n\n"
-                        f"📊 *Course Overview:*\n"
-                        f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
-                        f"• {len(course_data.get('videos', []))} Video Resources\n\n"
-                        f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
-                        "What would you like to access?\n"
-                        "1️⃣ Study Materials (PDFs)\n"
-                        "2️⃣ Video Lessons\n"
-                        "3️⃣ Take Quizzes\n"
-                        "4️⃣ Course Overview\n\n"
-                        "💡 *Navigation:*\n"
-                        "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
-                    )
+                    # Get fresh resources with user's token
+                    token = user_moodle_data[phone]['token']
+                    contents = get_course_contents_moodle(token, int(course_id))
+                    resources = extract_moodle_resources(contents, token)
+                    
+                    # FIXED: Correct the print statements
+                    print("\n" + "="*50)
+                    print("RESOURCES FOUND:")
+                    print(f"Resources keys: {resources.keys()}")
+                    print(f"Presentations count: {len(resources.get('presentations', []))}")
+                    if resources.get('presentations'):
+                        print("Presentations:")
+                        for ppt in resources['presentations']:
+                            print(f"  - {ppt.get('title')} ({ppt.get('filename')})")
+                    print("="*50 + "\n")
+                    
+                    # Show dynamic overview
+                    overview = create_course_overview(resources, course_data['name'], len(course_data.get('quizzes', [])))
+                    print("OVERVIEW MENU:")
+                    print(overview)
+                    print("="*50)
+                    
+                    response_text = overview
+                    return twiml_message(overview)
                 else:
                     # User NOT enrolled - show enroll option
                     user_state[phone] = f"browsing_{course_id}"
@@ -643,25 +772,33 @@ async def handle_moodle_login_flow(phone, raw_msg):
                     user_state[phone] = f"enrolled_{course_id}"
                     
                     # Get course data to show content
-                    courses = get_available_courses()
-                    course_data = courses.get(str(course_id), {})
+                    # courses = get_available_courses()
+                    # course_data = courses.get(str(course_id), {})
+                    user_state[phone] = f"enrolled_{course_id}"
+                    # Get fresh resources with user's token
+                    token = user_moodle_data[phone]['token']
+                    contents = get_course_contents_moodle(token, int(course_id))
+                    resources = extract_moodle_resources(contents, token)
                     
-                    # AUTOMATICALLY SHOW CONTENT MENU
-                    response_text = (
-                        f"🎉 *Enrollment Successful!*\n\n"
-                        f"✅ You are now enrolled in: *{course_name}*\n\n"
-                        f"📊 *Course Overview:*\n"
-                        f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
-                        f"• {len(course_data.get('videos', []))} Video Resources\n\n"
-                        f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
-                        "What would you like to access first?\n"
-                        "1️⃣ Study Materials (PDFs)\n"
-                        "2️⃣ Video Lessons\n"
-                        "3️⃣ Take Quizzes\n"
-                        "4️⃣ Course Overview\n\n"
-                        "💡 *Navigation:*\n"
-                        "0️⃣ Main Menu • 9️⃣ Back to Courses • #️⃣ Exit"
-                    )
+                    # FIXED: Correct the print statements
+                    print("\n" + "="*50)
+                    print("RESOURCES FOUND:")
+                    print(f"Resources keys: {resources.keys()}")
+                    print(f"Presentations count: {len(resources.get('presentations', []))}")
+                    if resources.get('presentations'):
+                        print("Presentations:")
+                        for ppt in resources['presentations']:
+                            print(f"  - {ppt.get('title')} ({ppt.get('filename')})")
+                    print("="*50 + "\n")
+                    
+                    # Show dynamic overview
+                    overview = create_course_overview(resources, course_data['name'], len(course_data.get('quizzes', [])))
+                    print("OVERVIEW MENU:")
+                    print(overview)
+                    print("="*50)
+                    
+                    response_text = overview
+                    return twiml_message(overview)
                     
                     escaped_text = escape_xml(response_text)
                     raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
@@ -718,7 +855,7 @@ def main_menu_text():
     )
 
 
-def create_quiz_response(course_data, base_url: str = "https://5450-41-75-182-30.ngrok-free.app"):
+def create_quiz_response(course_data, base_url: str = BASE_URL):
     """Create response showing all quizzes with clickable links for each module"""
     
     # Get quizzes from the course data
@@ -767,17 +904,36 @@ def create_quiz_response(course_data, base_url: str = "https://5450-41-75-182-30
     return raw_xml
 
 @router.post("/")  
-async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
-    raw_msg = Body.strip()
+async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default="")):
+    raw_msg = (Body or "").strip()
     user_msg = raw_msg.lower()
-    phone = From
-    base_url = "https://fd9e-41-75-172-172.ngrok-free.app" 
+    phone = normalize_phone_key(From or "")
+    base_url = BASE_URL
+
+    # Twilio status callbacks may hit this webhook without message content.
+    if not phone or not raw_msg:
+        return twiml_message()
     
     # ====== CHECK FOR MOODLE LOGIN FLOW FIRST ======
     if user_state.get(phone, "") in ["moodle_username", "moodle_password"]:
         login_response = await handle_moodle_login_flow(phone, raw_msg)
         if login_response:
             return login_response 
+
+    # ====== MANUAL CACHE REFRESH ======
+    if user_msg in ["refresh", "reload", "sync"]:
+        try:
+            clear_courses_cache()
+            fresh_courses = get_available_courses(force_refresh=True)
+            response_text = (
+                f"🔄 Course list refreshed.\n\n"
+                f"Found {len(fresh_courses)} course(s) from Moodle.\n\n"
+                "Reply 1 to browse courses."
+            )
+        except Exception:
+            response_text = "⚠️ Refresh failed. Please try again in a few seconds."
+
+        return twiml_message(response_text)
     
     # ====== FIRST CONTACT ======
     if phone not in user_state:
@@ -793,15 +949,13 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             "6️⃣ Ask Question Q&A\n\n"
             "0️⃣ Main Menu • #️⃣ Exit"
         )
-        escaped_text = escape_xml(response_text)
-        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-        return Response(content=raw_xml, media_type="application/xml")
+        return twiml_message(response_text)
     
     # ====== MAIN MENU ======
     if user_state[phone] == "main_menu":
         if user_msg in ["1", "browse"]:
             user_state[phone] = "browse_courses"
-            courses = get_available_courses()
+            courses = get_available_courses(force_refresh=False)
             course_ids = list(courses.keys())
 
             if not courses:
@@ -938,7 +1092,7 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
             user_state[phone] = "question_mode"
             
             # Show available course materials for context
-            courses = get_available_courses()
+            courses = get_available_courses(force_refresh=True)
             if not courses:
                 response_text = (
                     "🤖 *Document Q&A*\n\n"
@@ -972,9 +1126,96 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 "1️⃣-6️⃣ for actions or 0️⃣ for main menu"
             )
         
-        escaped_text = escape_xml(response_text)
-        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-        return Response(content=raw_xml, media_type="application/xml")
+        return twiml_message(response_text)
+
+    # ====== QUIZ SELECTION HANDLER ======
+    if user_state[phone] == "quiz_selection":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text())
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+        if user_msg in ["1", "2", "3"]:
+            user_state[phone] = "view_results"
+            quiz_names = {
+                "1": "Infection Prevention Basics",
+                "2": "Safety Procedures",
+                "3": "Emergency Protocols",
+            }
+            return twiml_message(
+                f"✅ You selected *{quiz_names[user_msg]}*.\n\n"
+                "This demo bot currently shows sample results only.\n\n"
+                "4️⃣ View Quiz Results • 0️⃣ Main Menu"
+            )
+        return twiml_message("Please select quiz 1, 2, 3 or 0 for main menu.")
+
+    # ====== VIEW RESULTS HANDLER ======
+    if user_state[phone] == "view_results":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text())
+        if user_msg in ["3", "quiz", "take new quiz"]:
+            user_state[phone] = "quiz_selection"
+            return twiml_message(
+                "📝 *Quiz Center*\n\n"
+                "Available quizzes:\n"
+                "1. Infection Prevention Basics\n"
+                "2. Safety Procedures\n"
+                "3. Emergency Protocols\n\n"
+                "0️⃣ Main Menu • #️⃣ Exit\n\n"
+                "Select a quiz number to start:"
+            )
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+        return twiml_message(
+            "📊 *Your Quiz Results*\n\n"
+            "🦠 Infection Prevention: 85%\n"
+            "🛡️ Safety Procedures: 92%\n"
+            "🚨 Emergency Protocols: 78%\n\n"
+            "Overall Performance: Good! 🎉\n\n"
+            "0️⃣ Main Menu • 3️⃣ Take New Quiz"
+        )
+
+    # ====== TRAINER SUPPORT HANDLER ======
+    if user_state[phone] == "ask_trainer":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text())
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+        user_state[phone] = "main_menu"
+        return twiml_message(
+            "✅ Your message has been sent to a trainer.\n\n"
+            "A trainer will follow up with you.\n\n"
+            "Returning to main menu:\n\n"
+            + main_menu_text()
+        )
+
+    # ====== QUESTION MODE HANDLER ======
+    if user_state[phone] == "question_mode":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text())
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            return twiml_message("👋 Thank you for using MoH E-Learning Assistant!")
+
+        try:
+            chat_response = answer_question(ChatRequest(question=raw_msg))
+            response_text = (
+                f"🤖 {chat_response.answer}\n\n"
+                "Ask another question, or reply 0 for main menu."
+            )
+        except Exception as e:
+            print(f"Q&A error: {e}")
+            response_text = (
+                "⚠️ I could not process your question right now.\n\n"
+                "Please try again, or reply 0 for main menu."
+            )
+        return twiml_message(response_text)
 
     # ====== MY ENROLLED COURSES HANDLER ======
     if user_state[phone] == "my_courses":
@@ -1000,31 +1241,25 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 token = user_moodle_data[phone]['token']
                 userid = user_moodle_data[phone]['userid']
                 enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
-                
                 if user_msg.isdigit() and 1 <= int(user_msg) <= len(enrolled_courses):
                     selected_course = enrolled_courses[int(user_msg)-1]
                     course_id = selected_course['id']
                     
-                    # Get course details
+                    # Get course details and resources
                     all_courses = get_available_courses()
                     course_data = all_courses.get(str(course_id), {})
                     
                     if course_data:
+                        # Get fresh resources with user's token
+                        token = user_moodle_data[phone]['token']
+                        contents = get_course_contents_moodle(token, int(course_id))
+                        resources = extract_moodle_resources(contents, token)
+                        
                         user_state[phone] = f"enrolled_{course_id}"
-                        response_text = (
-                            f"🎓 *{selected_course['name']}*\n\n"
-                            f"📊 *Course Overview:*\n"
-                            f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
-                            f"• {len(course_data.get('videos', []))} Video Resources\n\n"
-                            f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
-                            "What would you like to access?\n"
-                            "1️⃣ Study Materials (PDFs)\n"
-                            "2️⃣ Video Lessons\n"
-                            "3️⃣ Take Quizzes\n"
-                            "4️⃣ Course Overview\n\n"
-                            "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
-                        )
+                        
+                        # Show dynamic overview
+                        overview = create_course_overview(resources, selected_course['name'], len(course_data.get('quizzes', [])))
+                        response_text = overview
                     else:
                         response_text = (
                             f"Course content not available for: {selected_course['name']}\n\n"
@@ -1106,197 +1341,232 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
             response_text = main_menu_text()
+            return twiml_message(response_text)
+            
         elif user_msg in ["#", "exit"]:
             response_text = "👋 Thank you for using MoH E-Learning Assistant!"
             user_state.pop(phone, None)
+            return twiml_message(response_text)
+            
         else:
-            all_courses = get_available_courses()
-            course_keys = list(all_courses.keys())  # these are actual Moodle IDs as strings
-
-            if user_msg.isdigit() and 1 <= int(user_msg) <= len(course_keys):
-                selected_course_id = int(course_keys[int(user_msg) - 1])
-                selected_course = all_courses[str(selected_course_id)]
-
-                # CHECK IF LOGGED IN
-                if phone not in user_moodle_data or 'token' not in user_moodle_data[phone]:
-                    # Store original intent so we can continue after login
-                    user_moodle_data.setdefault(phone, {})['original_intent'] = {
-                        'action': 'check_enrollment',
-                        'course_id': selected_course_id
-                    }
-                    user_state[phone] = "moodle_username"
-                    response_text = (
-                        f"🔐 *Login Required*\n\n"
-                        f"To view '{selected_course['name']}' or enroll, please login first.\n\n"
-                        "Enter your username:"
-                    )
-                else:
-                    # Logged in - fetch enrolled courses
+            # Get fresh courses list
+            all_courses = get_available_courses(force_refresh=False)
+            
+            if not all_courses:
+                response_text = "No courses available at the moment. Please try again later."
+                return twiml_message(response_text)
+                
+            course_keys = list(all_courses.keys())
+            
+            # Check if user input is a valid number
+            if user_msg.isdigit():
+                selected_num = int(user_msg)
+                
+                if 1 <= selected_num <= len(course_keys):
+                    selected_course_id = course_keys[selected_num - 1]
+                    selected_course = all_courses[selected_course_id]
+                    
+                    # Debug: Print selected course
+                    print(f"\n🔍 Selected course: {selected_course['name']} (ID: {selected_course_id})")
+                    
+                    # CHECK IF USER IS LOGGED IN
+                    if phone not in user_moodle_data or 'token' not in user_moodle_data.get(phone, {}):
+                        # Store original intent for after login
+                        user_moodle_data.setdefault(phone, {})
+                        user_moodle_data[phone]['original_intent'] = {
+                            'action': 'check_enrollment',
+                            'course_id': int(selected_course_id),
+                            'course_name': selected_course['name']
+                        }
+                        user_state[phone] = "moodle_username"
+                        
+                        response_text = (
+                            f"🔐 *Login Required*\n\n"
+                            f"To view '{selected_course['name']}' or enroll, please login first.\n\n"
+                            "Enter your Moodle username:"
+                        )
+                        return twiml_message(response_text)
+                    
+                    # User is logged in - check enrollment
                     token = user_moodle_data[phone]['token']
                     userid = user_moodle_data[phone]['userid']
-                    enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
-                    user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
-
-                    # Check enrollment
-                    is_enrolled = any(course['id'] == selected_course_id for course in enrolled_courses)
-
-                    if is_enrolled:
-                        user_state[phone] = f"enrolled_{selected_course_id}"
-                        response_text = (
-                            f"🎓 *{selected_course['name']}*\n\n"
-                            f"✅ *Status:* Already enrolled\n\n"
-                            f"📊 *Course Overview:*\n"
-                            f"• {len(selected_course.get('pdfs', []))} PDFs\n"
-                            f"• {len(selected_course.get('videos', []))} Videos\n\n"
-                            f"• {len(selected_course.get('quizzes', []))} quizzes\n\n"
-                            "What would you like to access?\n"
-                            "1️⃣ Study Materials (PDFs)\n"
-                            "2️⃣ Video Lessons\n"
-                            "3️⃣ Take Quizzes\n"
-                            "4️⃣ Course Overview\n\n"
-                            "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
-                        )
-                    else:
-                        user_state[phone] = f"browsing_{selected_course_id}"
-                        response_text = (
-                            f"📚 *{selected_course['name']}*\n\n"
-                            f"📊 *Course Overview:*\n"
-                            f"• {len(selected_course.get('pdfs', []))} PDFs\n"
-                            f"• {len(selected_course.get('videos', []))} Videos\n\n"
-                            f"• {len(selected_course.get('quizzes', []))} quizzes\n\n"
-                            "🔒 *You are NOT enrolled in this course*\n\n"
-                            "1️⃣ Enroll in this Course\n\n"
-                            "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
-                        )
+                    
+                    try:
+                        enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                        user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
+                        
+                        # Check if user is enrolled in this course
+                        is_enrolled = any(str(course['id']) == str(selected_course_id) for course in enrolled_courses)
+                        
+                        if is_enrolled:
+                            # User is enrolled - get course contents and show overview
+                            user_state[phone] = f"enrolled_{selected_course_id}"
+                            
+                            # Get course contents with user's token
+                            contents = get_course_contents_moodle(token, int(selected_course_id))
+                            resources = extract_moodle_resources(contents, token)
+                            
+                            # Show dynamic overview
+                            overview = create_course_overview(
+                                resources, 
+                                selected_course['name'], 
+                                len(selected_course.get('quizzes', []))
+                            )
+                            
+                            print(f"\n✅ User enrolled in {selected_course['name']}")
+                            return twiml_message(overview)
+                            
+                        else:
+                            # User is not enrolled - show enroll option
+                            user_state[phone] = f"browsing_{selected_course_id}"
+                            
+                            # Get course contents preview (without enrollment)
+                            contents = get_course_contents_moodle(token, int(selected_course_id))
+                            resources = extract_moodle_resources(contents, token)
+                            
+                            # Count resources for preview
+                            total_files = sum(len(resources.get(cat, [])) for cat in resources.keys())
+                            
+                            response_text = (
+                                f"📚 *{selected_course['name']}*\n\n"
+                                f"📊 *Course Overview:*\n"
+                                f"• {len(resources.get('documents', []))} Documents\n"
+                                f"• {len(resources.get('videos', []))} Videos\n"
+                                f"• {len(resources.get('presentations', []))} Presentations\n"
+                                f"• {len(selected_course.get('quizzes', []))} Quizzes\n\n"
+                                f"📁 Total Resources: {total_files}\n\n"
+                                f"🔒 *You are NOT enrolled in this course*\n\n"
+                                f"1️⃣ Enroll in this Course\n\n"
+                                f"💡 *Navigation:*\n"
+                                f"0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
+                            )
+                            return twiml_message(response_text)
+                            
+                    except Exception as e:
+                        print(f"❌ Error checking enrollment: {e}")
+                        response_text = "An error occurred. Please try again or contact support."
+                        return twiml_message(response_text)
+                        
+                else:
+                    response_text = (
+                        f"Invalid course number. Please select a number between 1 and {len(course_keys)}.\n\n"
+                        "0️⃣ Main Menu • #️⃣ Exit"
+                    )
+                    return twiml_message(response_text)
             else:
                 response_text = (
-                    "Invalid course number.\n\n"
-                    "💡 *Navigation:*\n"
+                    "Invalid input. Please enter a valid course number.\n\n"
                     "0️⃣ Main Menu • #️⃣ Exit"
                 )
+                return twiml_message(response_text)
 
-        escaped_text = escape_xml(response_text)
-        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-        return Response(content=raw_xml, media_type="application/xml")
-    
     # ====== ENROLLED COURSE ACTIONS ======
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"enrolled_{course_id}":
-            # 🎯 FIXED: Check if user is logged in
+            # Check if user is logged in
             if phone not in user_moodle_data or 'token' not in user_moodle_data[phone]:
                 response_text = "Please login to access course materials."
-                escaped_text = escape_xml(response_text)
-                raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-                return Response(content=raw_xml, media_type="application/xml")
+                return twiml_message(response_text)
             
             # User is logged in - use Moodle system
             token = user_moodle_data[phone]['token']
             
-            if user_msg == "1":
-                # Study Materials (PDFs)
-                contents = get_course_contents_moodle(token, int(course_id))
-                resources = extract_moodle_resources(contents, token)
-                pdfs = resources.get('pdfs', [])
-                course_name = course_data["name"]
+            # Get ALL resources using the dynamic extractor
+            contents = get_course_contents_moodle(token, int(course_id))
+            resources = extract_moodle_resources(contents, token)
+            
+            # Define all possible categories in desired display order
+            all_categories = [
+                ('documents', '📄'),
+                ('presentations', '📊'),
+                ('spreadsheets', '📈'),
+                ('images', '🖼️'),
+                ('audio', '🎵'),
+                ('videos', '🎥'),
+                ('archives', '📦'),
+                ('other', '📁')
+            ]
+            
+            # Get ONLY the categories that actually have content
+            available_categories = []
+            for category_key, icon in all_categories:
+                if resources.get(category_key):
+                    available_categories.append((category_key, icon))
+            
+            # Get quiz count
+            quiz_count = len(course_data.get('quizzes', []))
+            # Check if user selected a category (based on menu position)
+            if user_msg.isdigit():
+                selected_index = int(user_msg) - 1
                 
-                if pdfs:
-                    raw_xml = create_moodle_pdf_response(pdfs, course_name)
-                    return Response(content=raw_xml, media_type="application/xml")
-                else:
-                    response_text = "No PDFs available for this course."
+                # Check if selection is within available categories
+                if 0 <= selected_index < len(available_categories):
+                    category_key, icon = available_categories[selected_index]
                     
-            elif user_msg == "2":
-                # Video Lessons
-                contents = get_course_contents_moodle(token, int(course_id))
-                resources = extract_moodle_resources(contents, token)
-                videos = resources.get('videos', [])
-                course_name = course_data["name"]
+                    # SPECIAL HANDLING FOR VIDEOS - Show options menu
+                    if category_key == 'videos':
+                        # Set state to moodle_videos for this course
+                        user_state[phone] = f"moodle_videos_{course_id}"
+                        
+                        # Get videos from resources
+                        videos = resources.get('videos', [])
+                        video_count = len(videos)
+                        
+                        # Create options menu
+                        response_text = (
+                            f"🎥 *{course_data['name']} - Videos*\n\n"
+                            f"Found {video_count} video(s).\n\n"
+                            f"How would you like to access them?\n\n"
+                            f"1️⃣ Get direct links (view in browser)\n"
+                            f"2️⃣ Download to WhatsApp\n\n"
+                            f"9️⃣ Back to Course • 0️⃣ Main Menu"
+                        )
+                        return twiml_message(response_text)
+                    else:
+                        # For all other categories, use the generic content response
+                        raw_xml = create_generic_content_response(resources, course_data['name'], category_key)
+                        return Response(content=raw_xml, media_type="application/xml")
                 
-                if videos:
-                    response_text = (
-                        f"🎥 *{course_name} - Videos*\n\n"
-                        f"Found {len(videos)} video(s).\n\n"
-                        f"Would you like to:\n"
-                        f"1️⃣ Get direct links to videos\n"
-                        f"2️⃣ Download and send videos\n\n"
-                        f"9️⃣ Back • 0️⃣ Main Menu"
-                    )
-                    user_state[phone] = f"moodle_videos_{course_id}"
-                else:
-                    response_text = "No videos available for this course."
-                    
-            elif user_msg == "3":
-                # Take Quizzes - THIS IS THE CORRECT HANDLER
-                print(f"📝 User requested quizzes for course: {course_data['name']}")
-                print(f"   Found {len(course_data.get('quizzes', []))} quizzes")
-                
-                # Check if there are quizzes
-                if course_data.get('quizzes') and len(course_data['quizzes']) > 0:
+                # Check if selection is the quiz option (always after categories)
+                elif selected_index == len(available_categories) and quiz_count > 0:
                     raw_xml = create_quiz_response(course_data, base_url)
                     return Response(content=raw_xml, media_type="application/xml")
-                else:
-                    response_text = "No quizzes available for this course yet."
-                    
-            elif user_msg == "4":
-                # Course Overview
-                response_text = (
-                    f"📋 *{course_data['name']} - Course Overview*\n\n"
-                    f"This course contains:\n"
-                    f"• {len(course_data.get('pdfs', []))} PDF study materials\n"
-                    f"• {len(course_data.get('videos', []))} video lessons\n"
-                    f"• {len(course_data.get('quizzes', []))} quizzes\n\n"
-                    "Access your materials:\n"
-                    "1️⃣ Study Materials (PDFs)\n"
-                    "2️⃣ Video Lessons\n"
-                    "3️⃣ Take Quizzes\n\n"
-                    "💡 *Navigation:*\n"
-                    "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
-                )
                 
-            elif user_msg == "9":
+                # Handle invalid selections
+                else:
+                    response_text = "Invalid option. Please select a valid number."
+                    return twiml_message(response_text)
+            
+            # Handle navigation
+            if user_msg == "9":
                 if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
                     user_state[phone] = "my_courses"
                     response_text = "↩️ Returning to your enrolled courses..."
                 else:
                     user_state[phone] = "browse_courses"
                     response_text = "↩️ Returning to browse courses..."
-                    
+                return twiml_message(response_text)
+                
             elif user_msg in ["0", "menu"]:
                 user_state[phone] = "main_menu"
-                response_text = (
-                    "👋 Welcome back to MoH E-Learning Assistant!\n\n"
-                    "📚 *Available Actions:*\n"
-                    "1️⃣ Browse Courses\n"
-                    "2️⃣ My Enrolled Courses\n"
-                    "3️⃣ Take a Quiz\n"
-                    "4️⃣ View Quiz Results\n"
-                    "5️⃣ Ask Trainer for Help\n"
-                    "6️⃣ Ask Question Q&A\n\n"
-                    "0️⃣ Main Menu • #️⃣ Exit"
-                )
+                response_text = main_menu_text()
+                return twiml_message(response_text)
                 
             elif user_msg == "#":
                 response_text = "👋 Thank you for using MoH E-Learning Assistant!"
                 user_state.pop(phone, None)
+                return twiml_message(response_text)
                 
             else:
-                response_text = (
-                    "Please select 1, 2, 3, or 4.\n\n"
-                    "💡 *Navigation:*\n"
-                    "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
-                )
-            
-            escaped_text = escape_xml(response_text)
-            raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-            return Response(content=raw_xml, media_type="application/xml")
-    
-    # ====== MOODLE VIDEOS HANDLER ======
+                # Show dynamic overview menu
+                overview = create_course_overview(resources, course_data['name'], quiz_count)
+                return twiml_message(overview)
+
+        # ====== MOODLE VIDEOS HANDLER ======
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"moodle_videos_{course_id}":
             if user_msg == "1":
-                # Get direct links
+                # Get direct links (view in browser)
                 token = user_moodle_data[phone]['token']
                 contents = get_course_contents_moodle(token, int(course_id))
                 resources = extract_moodle_resources(contents, token)
@@ -1306,39 +1576,24 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 if not videos:
                     response_text = "No videos available."
                 else:
-                    messages_xml = []
-                    
-                    header = f'''<Message>
-                        <Body>🔗 {escape_xml(course_name)} - Video Links</Body>
-                    </Message>'''
-                    messages_xml.append(header)
-                    
-                    for i, video in enumerate(videos[:3]):
-                        video_message = f'''<Message>
-                            <Body>🎥 {i+1}. {escape_xml(video['title'])}</Body>
-                            <Media>{escape_xml(video['url'])}</Media>
-                        </Message>'''
-                        messages_xml.append(video_message)
-                    
-                    nav_message = f'''<Message>
-                        <Body>💡 Try opening links in browser if they don't play in WhatsApp.\n\nNavigation:\n9️⃣ Back • 0️⃣ Main Menu</Body>
-                    </Message>'''
-                    messages_xml.append(nav_message)
-                    
-                    return Response(
-                        content=f'''<?xml version="1.0" encoding="UTF-8"?>
-                        <Response>
-                        {"".join(messages_xml)}
-                        </Response>''',
-                        media_type="application/xml"
-                    )
+                    raw_xml = create_video_links_response(videos, course_name)
+                    return Response(content=raw_xml, media_type="application/xml")
                     
             elif user_msg == "2":
-                # Download videos
+                # Download videos to WhatsApp
                 token = user_moodle_data[phone]['token']
-                video_urls = course_data["videos"]
+                contents = get_course_contents_moodle(token, int(course_id))
+                resources = extract_moodle_resources(contents, token)
+                video_urls = resources.get('videos', [])
                 course_name = course_data["name"]
-                raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, base_url)            
+                
+                if not video_urls:
+                    response_text = "No videos available for this course."
+                    return twiml_message(response_text)
+                
+                # Show downloading message
+                downloading_msg = f"⏳ Downloading {len(video_urls)} video(s) to WhatsApp...\n\nThis may take a moment."
+                raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, base_url)
                 return Response(content=raw_xml, media_type="application/xml")
                 
             elif user_msg == "9":
@@ -1350,16 +1605,19 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                 response_text = "Returning to main menu..."
                 
             else:
-                response_text = "Please select 1, 2, or 9."
+                response_text = (
+                    "Please select:\n"
+                    "1️⃣ Get direct links (view in browser)\n"
+                    "2️⃣ Download to WhatsApp\n"
+                    "9️⃣ Back • 0️⃣ Main Menu"
+                )
             
-            escaped_text = escape_xml(response_text)
-            raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-            return Response(content=raw_xml, media_type="application/xml")
+            return twiml_message(response_text)
     
     # ====== BROWSING SPECIFIC COURSE HANDLER ======
     for course_id, course_data in get_available_courses().items():
         if user_state[phone] == f"browsing_{course_id}":
-            base_url = "https://fd9e-41-75-172-172.ngrok-free.app"
+            base_url = BASE_URL
                 
             if user_msg == "1":
                 # Check if user is logged into Moodle
@@ -1380,23 +1638,33 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                         print(f"⚠️ Could not check current enrollments: {e}")
                     
                     if already_enrolled:
-                        # User is already enrolled - show course content
+                        # User is already enrolled - show course content with proper resources
                         user_state[phone] = f"enrolled_{course_id}"
-                        response_text = (
-                            f"ℹ️ *ALREADY ENROLLED*\n\n"
-                            f"You are already enrolled in: *{course_data['name']}*\n\n"
-                            f"📊 *Course Overview:*\n"
-                            f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
-                            f"• {len(course_data.get('videos', []))} Video Resources\n\n"
-                            f"• {len(selected_course.get('quizzes', []))} quizzes\n\n" 
-                            "What would you like to access?\n"
-                            "1️⃣ Study Materials (PDFs)\n"
-                            "2️⃣ Video Lessons\n"
-                            "3️⃣ Take Quizzes\n"  # ← NEED TO ADD THIS LINE
-                            "4️⃣ Course Overview\n\n"
-                            "💡 *Navigation:*\n"
-                            "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
-                        )
+                        
+                        # Get fresh resources with user's token
+                        token = user_moodle_data[phone]['token']
+                        contents = get_course_contents_moodle(token, int(course_id))
+                        resources = extract_moodle_resources(contents, token)
+                        
+                        # FIXED: Correct the print statements
+                        print("\n" + "="*50)
+                        print("RESOURCES FOUND:")
+                        print(f"Resources keys: {resources.keys()}")
+                        print(f"Presentations count: {len(resources.get('presentations', []))}")
+                        if resources.get('presentations'):
+                            print("Presentations:")
+                            for ppt in resources['presentations']:
+                                print(f"  - {ppt.get('title')} ({ppt.get('filename')})")
+                        print("="*50 + "\n")
+                        
+                        # Show dynamic overview
+                        overview = create_course_overview(resources, course_data['name'], len(course_data.get('quizzes', [])))
+                        print("OVERVIEW MENU:")
+                        print(overview)
+                        print("="*50)
+                        
+                        response_text = overview
+                        return twiml_message(overview)
                     else:
                         # Try to enroll
                         success = enroll_user_in_course(token, userid, int(course_id))
@@ -1421,22 +1689,32 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                                 
                                 if enrollment_verified:
                                     user_state[phone] = f"enrolled_{course_id}"
+                                    user_state[phone] = f"enrolled_{course_id}"
+                        
+                                    # Get fresh resources with user's token
+                                    token = user_moodle_data[phone]['token']
+                                    contents = get_course_contents_moodle(token, int(course_id))
+                                    resources = extract_moodle_resources(contents, token)
                                     
-                                    response_text = (
-                                        f"🎉 *ENROLLMENT SUCCESSFUL!* 🎉\n\n"
-                                        f"✅ You are now enrolled in: *{course_data['name']}*\n\n"
-                                        f"📊 *Course Overview:*\n"
-                                        f"• {len(course_data.get('pdfs', []))} PDF Documents\n"
-                                        f"• {len(course_data.get('videos', []))} Video Resources\n\n"
-                                        f"• {len(selected_course.get('quizzes', []))} quizzes\n\n"
-                                       "What would you like to access?\n"
-                                        "1️⃣ Study Materials (PDFs)\n"
-                                        "2️⃣ Video Lessons\n"
-                                        "3️⃣ Take Quizzes\n"
-                                        "4️⃣ Course Overview\n\n"
-                                        "💡 *Navigation:*\n"
-                                        "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
-                                    )
+                                    # FIXED: Correct the print statements
+                                    print("\n" + "="*50)
+                                    print("RESOURCES FOUND:")
+                                    print(f"Resources keys: {resources.keys()}")
+                                    print(f"Presentations count: {len(resources.get('presentations', []))}")
+                                    if resources.get('presentations'):
+                                        print("Presentations:")
+                                        for ppt in resources['presentations']:
+                                            print(f"  - {ppt.get('title')} ({ppt.get('filename')})")
+                                    print("="*50 + "\n")
+                                    
+                                    # Show dynamic overview
+                                    overview = create_course_overview(resources, course_data['name'], len(course_data.get('quizzes', [])))
+                                    print("OVERVIEW MENU:")
+                                    print(overview)
+                                    print("="*50)
+                                    
+                                    response_text = overview
+                                    return twiml_message(overview)
                                 else:
                                     # Enrollment didn't stick
                                     response_text = (
@@ -1518,9 +1796,13 @@ async def whatsapp_reply(Body: str = Form(...), From: str = Form(...)):
                     "0️⃣ Main Menu • 9️⃣ Back to Browse • #️⃣ Exit"
                 )
             
-            escaped_text = escape_xml(response_text)
-            raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-            return Response(content=raw_xml, media_type="application/xml")
+            return twiml_message(response_text)
+
+    # ====== FALLBACK FOR UNKNOWN SESSION STATES ======
+    user_state[phone] = "main_menu"
+    return twiml_message(
+        "⚠️ Session state was reset.\n\n" + main_menu_text()
+    )
 # Additional WhatsApp endpoints
 @router.get("/status")
 async def whatsapp_status():
@@ -1547,7 +1829,7 @@ async def whatsapp_info():
 async def startup_event():
     """Pre-load courses on startup for instant response"""
     get_available_courses()
-    threading.Thread(target=preload_courses_background, daemon=True).start()
+    start_preload_worker()
 
 # Keep backward compatibility - export app if needed for direct usage
 app = FastAPI(title="WhatsApp Chat")

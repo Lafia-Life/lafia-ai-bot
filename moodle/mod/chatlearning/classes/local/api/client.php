@@ -26,7 +26,15 @@ class client {
     }
 
     public function get_documents(stdClass $context): array {
-        $params = $this->build_context_params($context);
+        $params = [
+            'include_global' => !empty($context->includeglobaldocs) ? 'true' : 'false',
+        ];
+        if (!empty($context->allowedcourseids) && is_array($context->allowedcourseids)) {
+            $params['course_id'] = array_values($context->allowedcourseids);
+        }
+        if (!empty($context->allowedsourcetypes) && is_array($context->allowedsourcetypes)) {
+            $params['source_type'] = array_values($context->allowedsourcetypes);
+        }
         $response = $this->request('get', '/api/documents', $params);
         return $response['documents'] ?? $response;
     }
@@ -39,9 +47,9 @@ class client {
         return $this->request_stream('/api/chat', $payload);
     }
 
-    public function upload_document(stdClass $context, array $fileinfo): array {
+    public function upload_document(stdClass $context, array $fileinfo, array $extrafields = []): array {
         $params = $this->build_context_params($context);
-        $payload = array_merge($params, ['file' => $this->prepare_file($fileinfo)]);
+        $payload = array_merge($params, $extrafields, ['file' => $this->prepare_file($fileinfo)]);
         return $this->request('upload', '/api/documents', [], $payload);
     }
 
@@ -50,12 +58,34 @@ class client {
         return $this->request('post', '/api/scrape', [], $payload);
     }
 
+    public function delete_document(stdClass $context, string $documentid): array {
+        $payload = $this->build_context_params($context);
+        $path = '/api/documents/' . rawurlencode($documentid) . '/delete';
+        return $this->request('post', $path, [], $payload);
+    }
+
+    private function create_curl_client(): curl {
+        return new curl();
+    }
+
+    private function build_request_options(array $headers = []): array {
+        $options = [
+            'CURLOPT_TIMEOUT' => $this->timeout,
+            'CURLOPT_SSL_VERIFYPEER' => 1,
+            'CURLOPT_SSL_VERIFYHOST' => 2,
+        ];
+        if (!empty($headers)) {
+            $options['CURLOPT_HTTPHEADER'] = $headers;
+        }
+        return $options;
+    }
+
     private function request(string $method, string $path, array $query = [], ?array $body = null): array {
-        $curl = new curl(['timeout' => $this->timeout, 'ssl_verifypeer' => true, 'ssl_verifyhost' => 2]);
+        $curl = $this->create_curl_client();
         $url = $this->baseurl . $path;
 
         if (!empty($query)) {
-            $url .= (strpos($url, '?') === false ? '?' : '&') . http_build_query($query);
+            $url .= (strpos($url, '?') === false ? '?' : '&') . $this->build_query_string($query);
         }
 
         $headers = ['Accept: application/json'];
@@ -65,17 +95,17 @@ class client {
 
         switch ($method) {
             case 'get':
-                $response = $curl->get($url, null, $headers);
+                $response = $curl->get($url, $this->build_request_options($headers));
                 break;
             case 'post':
                 $headers[] = 'Content-Type: application/json';
-                $response = $curl->post($url, json_encode($body ?? []), $headers);
+                $response = $curl->post($url, json_encode($body ?? []), $this->build_request_options($headers));
                 break;
             case 'upload':
                 if ($body === null) {
                     throw new coding_exception('Upload request requires a body.');
                 }
-                $response = $curl->post($url, $body, $headers);
+                $response = $curl->post($url, $body, $this->build_request_options($headers));
                 break;
             default:
                 throw new coding_exception('Unsupported method: ' . $method);
@@ -97,7 +127,7 @@ class client {
     }
 
     private function request_stream(string $path, array $body): array {
-        $curl = new curl(['timeout' => $this->timeout, 'ssl_verifypeer' => true, 'ssl_verifyhost' => 2]);
+        $curl = $this->create_curl_client();
         $url = $this->baseurl . $path;
 
         $headers = ['Accept: application/x-ndjson', 'Content-Type: application/json'];
@@ -105,7 +135,7 @@ class client {
             $headers[] = 'Authorization: Bearer ' . $this->apikey;
         }
 
-        $response = $curl->post($url, json_encode($body), $headers);
+        $response = $curl->post($url, json_encode($body), $this->build_request_options($headers));
         $info = $curl->get_info();
         $status = $info['http_code'] ?? 0;
 
@@ -153,14 +183,23 @@ class client {
     }
 
     private function build_context_params(stdClass $context): array {
-        return [
+        $params = [
             'moodle_course_id' => $context->courseid,
             'moodle_cmid' => $context->cmid,
             'moodle_user_id' => $context->userid,
             'moodle_username' => $context->username,
             'moodle_fullname' => $context->fullname,
             'chatlearning_instance' => $context->instanceid,
+            'course_id' => (string)$context->courseid,
+            'include_global_docs' => !empty($context->includeglobaldocs),
         ];
+        if (!empty($context->allowedcourseids) && is_array($context->allowedcourseids)) {
+            $params['allowed_course_ids'] = array_map('strval', array_values($context->allowedcourseids));
+        }
+        if (!empty($context->allowedsourcetypes) && is_array($context->allowedsourcetypes)) {
+            $params['allowed_source_types'] = array_map('strval', array_values($context->allowedsourcetypes));
+        }
+        return $params;
     }
 
     private function prepare_file(array $fileinfo) {
@@ -176,5 +215,22 @@ class client {
         }
 
         return '@' . $fileinfo['tmp_name'];
+    }
+
+    private function build_query_string(array $query): string {
+        $parts = [];
+        foreach ($query as $key => $value) {
+            if (is_array($value)) {
+                foreach ($value as $item) {
+                    $parts[] = rawurlencode((string)$key) . '=' . rawurlencode((string)$item);
+                }
+                continue;
+            }
+            if ($value === null) {
+                continue;
+            }
+            $parts[] = rawurlencode((string)$key) . '=' . rawurlencode((string)$value);
+        }
+        return implode('&', $parts);
     }
 }

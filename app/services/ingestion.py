@@ -1,4 +1,5 @@
 import uuid
+import zipfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -18,6 +19,15 @@ from app.services.embeddings import embed_texts
 from app.services.vectorstore import get_collection, upsert_documents
 
 SUPPORTED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
+SCORM_TEXT_SUFFIXES = {
+    ".html",
+    ".htm",
+    ".xhtml",
+    ".xml",
+    ".txt",
+    ".js",
+    ".css",
+}
 
 
 def _sanitize_filename(filename: str) -> str:
@@ -71,7 +81,8 @@ def _build_chunk_payload(
     chunk_size: int,
     chunk_overlap: int,
     source_type: str,
-    course_id: Optional[str] = None
+    course_id: Optional[str] = None,
+    external_ref: Optional[str] = None,
 ) -> Tuple[List[str], List[dict], List[str]]:
     texts: List[str] = []
     metadatas: List[dict] = []
@@ -104,6 +115,8 @@ def _build_chunk_payload(
             # )
             if course_id:
                 metadata["course_id"] = course_id
+            if external_ref:
+                metadata["external_ref"] = external_ref
             metadatas.append(metadata)
             ids.append(chunk_id)
     return texts, metadatas, ids
@@ -128,6 +141,64 @@ def _extract_image_pages(image_path: Path) -> List[Tuple[int, str]]:
         raise ValueError(
             "Tesseract OCR is required to extract text from images. Install tesseract-ocr and retry."
         ) from exc
+    return pages
+
+
+def _decode_scorm_text(blob: bytes) -> str:
+    for encoding in ("utf-8", "latin-1"):
+        try:
+            return blob.decode(encoding, errors="ignore")
+        except Exception:  # noqa: BLE001
+            continue
+    return ""
+
+
+def _extract_scorm_pages(package_path: Path) -> List[Tuple[int, str]]:
+    pages: List[Tuple[int, str]] = []
+
+    try:
+        with zipfile.ZipFile(package_path) as archive:
+            names = [name for name in archive.namelist() if not name.endswith("/")]
+            has_manifest = any(name.lower().endswith("imsmanifest.xml") for name in names)
+            if not has_manifest:
+                raise ValueError("Uploaded ZIP is not a SCORM package (imsmanifest.xml missing).")
+
+            # Keep extraction bounded for large packages.
+            manifest_first = sorted(
+                names,
+                key=lambda name: (
+                    0 if name.lower().endswith("imsmanifest.xml") else 1,
+                    name.lower(),
+                ),
+            )[:300]
+
+            for name in manifest_first:
+                suffix = Path(name).suffix.lower()
+                if suffix not in SCORM_TEXT_SUFFIXES:
+                    continue
+
+                try:
+                    with archive.open(name) as handle:
+                        raw = handle.read(1_500_000)
+                except Exception:  # noqa: BLE001
+                    continue
+
+                text = _decode_scorm_text(raw)
+                if not text.strip():
+                    continue
+
+                if suffix in {".html", ".htm", ".xhtml", ".xml"}:
+                    soup = BeautifulSoup(text, "html.parser")
+                    text = soup.get_text(" ", strip=True)
+
+                cleaned = " ".join(text.split())
+                if not cleaned:
+                    continue
+
+                pages.append((len(pages) + 1, cleaned))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Invalid SCORM package: unable to read ZIP archive.") from exc
+
     return pages
 
 
@@ -234,27 +305,44 @@ def _build_web_chunk_payload(
     return texts, metadatas, ids
 
 
-def ingest_document(upload_bytes: bytes, filename: str, content_type: Optional[str] = None, course_id: Optional[str] = None) -> UploadResponse:
+def ingest_document(
+    upload_bytes: bytes,
+    filename: str,
+    content_type: Optional[str] = None,
+    course_id: Optional[str] = None,
+    source_type_hint: Optional[str] = None,
+    external_ref: Optional[str] = None,
+) -> UploadResponse:
     settings: Settings = get_settings()
     document_store = DocumentStore(settings.chroma_path)
     collection = get_collection()
+
+    if external_ref:
+        existing = document_store.find_by_external_ref(external_ref)
+        if existing:
+            return UploadResponse(document=existing, chunks_indexed=0)
 
     document_id = str(uuid.uuid4())
     saved_path = _save_upload(upload_bytes, filename, settings.uploads_path, document_id)
 
     suffix = saved_path.suffix.lower()
     mime = (content_type or "").lower()
+    hint = (source_type_hint or "").strip().lower()
     is_pdf = suffix == ".pdf" or mime == "application/pdf"
     is_image = suffix in SUPPORTED_IMAGE_SUFFIXES or mime.startswith("image/")
+    is_scorm = hint == "scorm" or suffix == ".zip" or "zip" in mime
 
     if is_pdf:
         pages = _extract_pages(saved_path)
         source_type = "pdf"
+    elif is_scorm:
+        pages = _extract_scorm_pages(saved_path)
+        source_type = "scorm"
     elif is_image:
         pages = _extract_image_pages(saved_path)
         source_type = "image"
     else:
-        raise ValueError("Unsupported file type. Upload a PDF or supported image format.")
+        raise ValueError("Unsupported file type. Upload a PDF, SCORM ZIP package, or supported image format.")
 
     texts, metadatas, ids = _build_chunk_payload(
         document_id=document_id,
@@ -263,7 +351,8 @@ def ingest_document(upload_bytes: bytes, filename: str, content_type: Optional[s
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
         source_type=source_type,
-        course_id=course_id
+        course_id=course_id,
+        external_ref=external_ref,
     )
 
     if not texts:
@@ -285,7 +374,8 @@ def ingest_document(upload_bytes: bytes, filename: str, content_type: Optional[s
         page_count=len(pages),
         source_type=source_type,
         url=None,
-        course_id=course_id
+        course_id=course_id,
+        external_ref=external_ref,
     )
     document_store.upsert(summary)
 

@@ -1,4 +1,4 @@
-
+from dotenv import load_dotenv
 import os
 from pathlib import Path
 import requests
@@ -8,7 +8,7 @@ import urllib.parse
 import json
 from urllib.parse import urlparse, parse_qs, urlencode
 import urllib3
-
+load_dotenv()
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -22,6 +22,7 @@ MOODLE_TOKEN = os.getenv("MOODLE_TOKEN")
 def get_moodle_courses():
     """Fetch courses from Moodle API"""
     url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+    # print("fetching courses from:", url)
     parameters = {
         "wstoken": MOODLE_TOKEN,
         "wsfunction": "core_course_get_courses",
@@ -60,6 +61,7 @@ def get_moodle_courses():
         return {}
 
 def get_moodle_course_contents(course_id: str):
+    """Fetch course contents from Moodle API with proper error handling"""
     url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
     params = {
         "wstoken": MOODLE_TOKEN,
@@ -68,71 +70,100 @@ def get_moodle_course_contents(course_id: str):
         "moodlewsrestformat": "json",
     }
 
-    response = requests.get(url, params=params, timeout=30)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        
+        # Check if request was successful
+        if response.status_code != 200:
+            error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+            print(f"❌ API error: {error_msg}")
+            return {"course_id": course_id, "sections": [], "error": error_msg}
+        
+        # Try to parse JSON
+        try:
+            sections_data = response.json()
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid JSON response: {str(e)}"
+            print(f"❌ {error_msg}")
+            print(f"Response text: {response.text[:200]}")
+            return {"course_id": course_id, "sections": [], "error": error_msg}
+        
+        # Check if we got an error from Moodle
+        if isinstance(sections_data, dict) and sections_data.get('exception'):
+            error_msg = f"Moodle API error: {sections_data.get('message', 'Unknown error')}"
+            print(f"❌ {error_msg}")
+            return {"course_id": course_id, "sections": [], "error": error_msg}
+        
+        # Process the data
+        sections = []
+        for section in sections_data:
+            section_obj = {
+                "id": section.get("id"),
+                "name": section.get("name") or "Untitled Section",
+                "videos": [],
+                "pdfs": [],
+                "powerpoints": [],
+                "quizzes": [],
+            }
 
-    sections_data = response.json()
-    sections = []
+            for module in section.get("modules", []):
+                module_name = module.get("name", "Untitled")
+                module_type = module.get("modname")
+                module_cmid = module.get("id")
 
-    for section in sections_data:
-        section_obj = {
-            "id": section.get("id"),
-            "name": section.get("name") or "Untitled Section",
-            "videos": [],
-            "pdfs": [],
-            "powerpoints": [],
-            "quizzes": [],
+                if module_type == "quiz":
+                    quiz_obj = {
+                        "title": module_name,
+                        "cmid": module_cmid,
+                        "course_id": course_id,
+                        "instance": module.get("instance"),
+                        "url": module.get("url")
+                    }
+                    section_obj["quizzes"].append(quiz_obj)
 
-        }
+                for content in module.get("contents", []):
+                    file_url = content.get("fileurl")
+                    mimetype = content.get("mimetype")
+                    filename = content.get("filename")
 
-        for module in section.get("modules", []):
-            module_name = module.get("name", "Untitled")
-            module_type = module.get("modname")
-            module_cmid = module.get("id")
+                    if not file_url or not mimetype:
+                        continue
 
-            if module_type == "quiz":
-                quiz_obj = {
-                    "title": module_name,
-                    "cmid": module_cmid,
-                    "course_id": course_id,
-                    "instance": module.get("instance"),
-                    "url": module.get("url")
-                }
+                    file_obj = {
+                        "title": module_name,
+                        "filename": filename,
+                        "url": file_url,
+                        "mimetype": mimetype,
+                        "cmid": module_cmid,
+                        "course_id": course_id,
+                    }
 
-                section_obj["quizzes"].append(quiz_obj)
+                    if mimetype.startswith("video/"):
+                        section_obj["videos"].append(file_obj)
+                    elif mimetype == "application/pdf":
+                        section_obj["pdfs"].append(file_obj)
+                    elif any(ppt in mimetype for ppt in [
+                        "powerpoint", 
+                        "presentation",
+                        "vnd.ms-powerpoint",
+                        "vnd.openxmlformats-officedocument.presentationml"
+                    ]):
+                        section_obj["powerpoints"].append(file_obj)
 
-            for content in module.get("contents", []):
-                file_url = content.get("fileurl")
-                mimetype = content.get("mimetype")
-                filename = content.get("filename")
+            sections.append(section_obj)
 
-                if not file_url or not mimetype:
-                    continue
+        return {"course_id": course_id, "sections": sections}
 
-                working_url = file_url
-
-                file_obj = {
-                    "title": module_name,
-                    "filename": filename,
-                    "url": working_url,
-                    "mimetype": mimetype,
-                    "cmid": module_cmid,
-                    "course_id": course_id,
-                }
-
-                if mimetype.startswith("video/"):
-                    section_obj["videos"].append(file_obj)
-                elif mimetype == "application/pdf":
-                    section_obj["pdfs"].append(file_obj)
-                elif mimetype in (
-                    "application/vnd.ms-powerpoint",
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                ):
-                    section_obj["powerpoints"].append(file_obj)
-
-        sections.append(section_obj)
-
-    return {"course_id": course_id, "sections": sections}
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Network error: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {"course_id": course_id, "sections": [], "error": error_msg}
+    except Exception as e:
+        error_msg = f"Unexpected error: {str(e)}"
+        print(f"❌ {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {"course_id": course_id, "sections": [], "error": error_msg}
 
 def preload_courses_background():
     """Preload all courses and contents every CACHE_DURATION seconds."""
@@ -150,15 +181,23 @@ def preload_courses_background():
             print(f"❌ Error preloading courses: {e}")
         time.sleep(CACHE_DURATION)
 
-def get_available_courses():
-    """Return Moodle courses with full content, using cache if available."""
+def get_available_courses(force_refresh=False):
+    """Return Moodle courses with full content, using cache if available.
+    
+    Args:
+        force_refresh: If True, bypass cache and fetch fresh data from Moodle
+    """
     global courses_cache, courses_cache_timestamp
 
     current_time = time.time()
-    with cache_lock:
-        if courses_cache and (current_time - courses_cache_timestamp < CACHE_DURATION):
-            return courses_cache.copy()
+    
+    # Check cache if not forcing refresh
+    if not force_refresh:
+        with cache_lock:
+            if courses_cache and (current_time - courses_cache_timestamp < CACHE_DURATION):
+                return courses_cache.copy()
 
+    # Force refresh or cache expired - fetch from Moodle
     moodle_courses = get_moodle_courses()
     courses = {}
     for course_id, course in moodle_courses.items():
@@ -189,6 +228,7 @@ def get_available_courses():
         except Exception as e:
             print(f"❌ Failed to load course {course['name']}: {e}")
 
+    # Update cache
     with cache_lock:
         courses_cache = courses
         courses_cache_timestamp = current_time
@@ -411,26 +451,52 @@ def get_course_contents_moodle(token: str, course_id: int):
         print(f"❌ Error getting course contents: {e}")
     return []
 
+
 def extract_moodle_resources(contents, token: str):
-    """Extract PDFs and videos from course contents - TESTED & WORKING"""
-    pdfs = []
-    videos = []
+    """Extract ALL resources from course contents dynamically"""
+    print(f"\n🔍 EXTRACT_MOODLE_RESOURCES - Contents type: {type(contents)}")
+    
+    resources = {
+        'documents': [],  # PDFs, Word docs, etc.
+        'presentations': [],  # PowerPoints, Keynote, etc.
+        'spreadsheets': [],  # Excel, CSV, etc.
+        'images': [],  # JPG, PNG, GIF, etc.
+        'audio': [],  # MP3, WAV, etc.
+        'videos': [],  # MP4, MOV, etc.
+        'archives': [],  # ZIP, RAR, etc.
+        'other': []  # Everything else
+    }
     
     if not contents:
-        return {'pdfs': pdfs, 'videos': videos}
+        print("❌ No contents provided")
+        return resources
     
-    for section in contents:
-        for module in section.get('modules', []):
-            for content in module.get('contents', []):
+    if not isinstance(contents, list):
+        print(f"❌ Contents is not a list: {type(contents)}")
+        return resources
+    
+    print(f"Processing {len(contents)} sections")
+    
+    for section_idx, section in enumerate(contents):
+        print(f"\nSection {section_idx}: {section.get('name', 'Unnamed')}")
+        modules = section.get('modules', [])
+        print(f"  Modules: {len(modules)}")
+        
+        for module in modules:
+            module_name = module.get('name', 'Unnamed Module')
+            contents_list = module.get('contents', [])
+            
+            for content in contents_list:
                 if content.get('type') == 'file':
-                    fileurl = content.get('fileurl', '')
-                    filename = content.get('filename', 'file')
+                    filename = content.get('filename', '')
                     mimetype = content.get('mimetype', '')
                     
+                    # Your existing code...
+                    # Add token to URL for direct access
+                    fileurl = content.get('fileurl', '')
                     if not fileurl:
                         continue
                     
-                    # Add token to URL for direct access
                     parsed = urlparse(fileurl)
                     query_params = parse_qs(parsed.query)
                     query_params['token'] = [token]
@@ -439,23 +505,252 @@ def extract_moodle_resources(contents, token: str):
                     new_query = urlencode(query_params, doseq=True)
                     accessible_url = parsed._replace(query=new_query).geturl()
                     
+                    # Get file extension
+                    file_ext = Path(filename).suffix.lower()
+                    
+                    # Create file info object
                     file_info = {
-                        'title': filename,
+                        'title': module_name,
+                        'filename': filename,
+                        'extension': file_ext,
                         'url': accessible_url,
                         'original_url': fileurl,
                         'size': content.get('filesize', 0),
-                        'type': mimetype
+                        'size_formatted': format_file_size(content.get('filesize', 0)),
+                        'type': mimetype,
+                        'module_name': module_name,
+                        'section_name': section.get('name', 'Unknown Section'),
+                        'section_id': section.get('id'),
+                        'module_id': module.get('id'),
+                        'downloadable': True
                     }
                     
-                    # Categorize
-                    if '.pdf' in filename.lower() or 'pdf' in mimetype:
-                        pdfs.append(file_info)
-                    elif any(ext in filename.lower() for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']) or 'video' in mimetype:
-                        videos.append(file_info)
-                    elif 'video' in filename.lower():
-                        videos.append(file_info)
+                    # Dynamically categorize based on mimetype and extension
+                    category = categorize_file(mimetype, file_ext, filename)
+                    
+                    # DEBUG: Print when we find a PowerPoint
+                    if category == 'presentations':
+                        print(f"  ✅ Found presentation: {filename}")
+                        print(f"     Module: {module_name}")
+                        print(f"     Section: {section.get('name')}")
+                    
+                    resources[category].append(file_info)
     
-    return {'pdfs': pdfs, 'videos': videos}
+    # Final summary
+    print(f"\n📊 EXTRACTION SUMMARY:")
+    for cat, items in resources.items():
+        if items:
+            print(f"  {cat}: {len(items)} items")
+    
+    return resources
+
+def format_file_size(size_bytes):
+    """Format file size in human-readable format"""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+def categorize_file(mimetype, extension, filename):
+    """Dynamically categorize files based on mimetype and extension"""
+    filename_lower = filename.lower()
+    mimetype_lower = mimetype.lower() if mimetype else ''
+    
+    # Documents
+    if any(ext in filename_lower for ext in ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt']) or \
+       any(keyword in mimetype_lower for keyword in ['pdf', 'document', 'text']):
+        return 'documents'
+    
+    # Presentations
+    if any(ext in filename_lower for ext in ['.ppt', '.pptx', '.key', '.odp']) or \
+       any(keyword in mimetype_lower for keyword in ['presentation', 'powerpoint']):
+        return 'presentations'
+    
+    # Spreadsheets
+    if any(ext in filename_lower for ext in ['.xls', '.xlsx', '.csv', '.ods']) or \
+       any(keyword in mimetype_lower for keyword in ['spreadsheet', 'excel', 'csv']):
+        return 'spreadsheets'
+    
+    # Images
+    if any(ext in filename_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp']) or \
+       'image' in mimetype_lower:
+        return 'images'
+    
+    # Audio
+    if any(ext in filename_lower for ext in ['.mp3', '.wav', '.ogg', '.m4a', '.flac']) or \
+       'audio' in mimetype_lower:
+        return 'audio'
+    
+    # Videos
+    if any(ext in filename_lower for ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv']) or \
+       'video' in mimetype_lower:
+        return 'videos'
+    
+    # Archives
+    if any(ext in filename_lower for ext in ['.zip', '.rar', '.7z', '.tar', '.gz']) or \
+       any(keyword in mimetype_lower for keyword in ['zip', 'compressed', 'archive']):
+        return 'archives'
+    
+    # Default
+    return 'other'
+
+def escape_xml(text: str) -> str:
+    """Escape XML special characters for WhatsApp messages"""
+    if text is None:
+        return ""
+    return (str(text).replace('&', '&amp;')
+               .replace('<', '&lt;')
+               .replace('>', '&gt;')
+               .replace('"', '&quot;')
+               .replace("'", '&apos;'))
+
+def create_generic_content_response(resources, course_name, category):
+    """Create a dynamic response for any content category"""
+    
+    category_icons = {
+        'documents': '📄',
+        'presentations': '📊',
+        'spreadsheets': '📈',
+        'images': '🖼️',
+        'audio': '🎵',
+        'videos': '🎥',
+        'archives': '📦',
+        'other': '📁'
+    }
+    
+    category_names = {
+        'documents': 'Documents',
+        'presentations': 'Presentations',
+        'spreadsheets': 'Spreadsheets',
+        'images': 'Images',
+        'audio': 'Audio Files',
+        'videos': 'Videos',
+        'archives': 'Archives',
+        'other': 'Other Files'
+    }
+    
+    items = resources.get(category, [])
+    icon = category_icons.get(category, '📄')
+    category_name = category_names.get(category, category.capitalize())
+    
+    if not items:
+        response_text = f"{icon} No {category_name} available for {course_name}"
+        escaped_text = escape_xml(response_text)
+        return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+    
+    messages_xml = []
+    
+    # Header
+    header = f'''<Message>
+        <Body>{icon} *{escape_xml(course_name)} - {category_name}* ({len(items)} total)</Body>
+    </Message>'''
+    messages_xml.append(header)
+    
+    # Instructions - ALL files are downloadable
+    if category in ['images', 'videos', 'audio']:
+        instructions = f'''<Message>
+            <Body>💡 Tap any file to play it in WhatsApp. Tap the download icon to save it.</Body>
+        </Message>'''
+    else:
+        instructions = f'''<Message>
+            <Body>💡 Tap any file to download it. You'll need a compatible app to open it.</Body>
+        </Message>'''
+    messages_xml.append(instructions)
+    
+    # Group by section/module if there are multiple sections
+    items_by_section = {}
+    for item in items:
+        section = item.get('section_name', 'General')
+        if section not in items_by_section:
+            items_by_section[section] = []
+        items_by_section[section].append(item)
+    
+    # Display items grouped by section
+    for section_name, section_items in items_by_section.items():
+        if len(items_by_section) > 1:  # Only show section header if multiple sections
+            section_header = f'''<Message>
+                <Body>📌 *{escape_xml(section_name)}*</Body>
+            </Message>'''
+            messages_xml.append(section_header)
+        
+        for i, item in enumerate(section_items[:5], 1):  # Limit to 5 per section
+            title = item.get('title', item.get('filename', 'File'))
+            size = item.get('size_formatted', '')
+            url = item.get('url', '')
+            
+            # Use Media tag for ALL file types to make them downloadable/playable
+            item_message = f'''<Message>
+                <Body>{i}. {escape_xml(title)} ({size})</Body>
+                <Media>{escape_xml(url)}</Media>
+            </Message>'''
+            messages_xml.append(item_message)
+        
+        if len(section_items) > 5:
+            more = f'''<Message>
+                <Body>... and {len(section_items) - 5} more files in {escape_xml(section_name)}</Body>
+            </Message>'''
+            messages_xml.append(more)
+    
+    # Navigation
+    nav_message = f'''<Message>
+        <Body>💡 *Navigation:*\n9️⃣ Back to Course • 0️⃣ Main Menu</Body>
+    </Message>'''
+    messages_xml.append(nav_message)
+    
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+{"".join(messages_xml)}
+</Response>'''
+
+def create_course_overview(resources, course_name, quiz_count=0):
+    """Create a dynamic course overview showing all content types"""
+    
+    # Define categories to display
+    categories = [
+        ('documents', '📄', 'Documents'),
+        ('presentations', '📊', 'Presentations'),
+        ('spreadsheets', '📈', 'Spreadsheets'),
+        ('images', '🖼️', 'Images'),
+        ('audio', '🎵', 'Audio'),
+        ('videos', '🎥', 'Videos'),
+        ('archives', '📦', 'Archives'),
+        ('other', '📁', 'Other')
+    ]
+    
+    overview = f"📋 *{escape_xml(course_name)} - Course Overview*\n\n"
+    overview += "📊 *Available Resources:*\n"
+    
+    total_files = 0
+    option_number = 1
+    options_text = ""
+    
+    for category_key, icon, display_name in categories:
+        count = len(resources.get(category_key, []))
+        if count > 0:
+            overview += f"{icon} {display_name}: {count}\n"
+            options_text += f"{option_number}️⃣ {display_name}\n"
+            option_number += 1
+            total_files += count
+    
+    if quiz_count > 0:
+        overview += f"📝 Quizzes: {quiz_count}\n"
+    
+    overview += f"\n📁 Total Resources: {total_files}\n\n"
+    
+    if options_text:
+        overview += "What would you like to access?\n"
+        overview += options_text
+    
+    if quiz_count > 0:
+        overview += f"{option_number}️⃣ Take Quizzes\n"
+    
+    overview += "\n💡 *Navigation:*\n0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit"
+    
+    return overview
 
 def enroll_user_in_course(token: str, userid: int, courseid: int):
     """
@@ -569,6 +864,31 @@ def enroll_user_in_course_admin(userid: int, courseid: int, roleid: int = 5):
         import traceback
         traceback.print_exc()
         return False
+    
+def clear_courses_cache():
+    """Clear the courses cache to force a refresh"""
+    global courses_cache, courses_cache_timestamp
+    with cache_lock:
+        courses_cache = {}
+        courses_cache_timestamp = 0
+    print("✅ Courses cache cleared")
+
+def start_preload_worker():
+    """Start the background preload worker thread"""
+    # Check if worker already running
+    for thread in threading.enumerate():
+        if thread.name == "moodle_preload_worker":
+            print("⚠️ Preload worker already running")
+            return
+    
+    # Start new worker thread
+    worker_thread = threading.Thread(
+        target=preload_courses_background,
+        name="moodle_preload_worker",
+        daemon=True
+    )
+    worker_thread.start()
+    print("✅ Preload worker started") 
     
 def is_user_enrolled_in_course(token: str, userid: int, courseid: int):
     """Check if user is already enrolled in a course"""

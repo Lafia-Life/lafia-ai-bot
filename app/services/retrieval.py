@@ -41,6 +41,30 @@ def _normalize_question(question: str) -> str:
 _answer_cache = AnswerCache()
 
 _NO_CONTEXT_MESSAGE = "I could not find the answer in the uploaded documents."
+_RETRIEVAL_CANDIDATES = 24
+
+
+def _retrieval_error_message(exc: Exception) -> str:
+    detail = str(exc).strip()
+    if "sentence-transformers" in detail:
+        return (
+            "Embeddings backend is not ready on this server. "
+            "Install 'sentence-transformers' or set EMBEDDING_BACKEND=openai "
+            "with a valid embedding model."
+        )
+    if detail:
+        return f"Unable to search indexed documents: {detail}"
+    return "Unable to search indexed documents due to a server configuration error."
+
+
+def _fetch_retrieval_results(collection, payload: ChatRequest) -> List[dict]:
+    embedding = embed_query(payload.question)
+    raw_results = query_collection(
+        collection=collection,
+        embedding=embedding,
+        n_results=_RETRIEVAL_CANDIDATES,
+    )
+    return _filter_results(raw_results, payload, limit=4)
 
 
 def _coerce_text(value) -> str:
@@ -104,14 +128,16 @@ def _format_context(results: List[dict]) -> str:
     return "\n\n".join(context_blocks)
 
 
-def _build_prompt(question: str, context: str) -> List[dict]:
+def _build_prompt(question: str, context: str, context_prompt: Optional[str] = None) -> List[dict]:
     system = (
-        "You are a helpful assistant answering questions about a collection of PDF documents. "
+        "You are a helpful assistant answering questions about a collection of course documents. "
         "Use only the provided context to answer. Quote relevant portions when useful. "
         "List citations in square brackets referencing the source filename and page numbers, "
         "for example [Report.pdf p.3]. If the answer cannot be derived from the context, "
         "respond with 'I could not find the answer in the uploaded documents.'"
     )
+    if context_prompt and context_prompt.strip():
+        system = system + "\n\nAdditional instructions:\n" + context_prompt.strip()
     return [
         {"role": "system", "content": system},
         {
@@ -121,6 +147,44 @@ def _build_prompt(question: str, context: str) -> List[dict]:
             ),
         },
     ]
+
+
+def _normalize_str_list(values: Optional[List[str]]) -> set[str]:
+    if not values:
+        return set()
+    return {str(item).strip().lower() for item in values if str(item).strip()}
+
+
+def _normalize_course_list(values: Optional[List[str]]) -> set[str]:
+    if not values:
+        return set()
+    return {str(item).strip() for item in values if str(item).strip()}
+
+
+def _filter_results(raw_results: List[dict], payload: ChatRequest, limit: int = 4) -> List[dict]:
+    allowed_source_types = _normalize_str_list(payload.allowed_source_types)
+    allowed_course_ids = _normalize_course_list(payload.allowed_course_ids)
+    include_global_docs = bool(payload.include_global_docs)
+
+    filtered: List[dict] = []
+    for result in raw_results:
+        metadata = result.get("metadata") or {}
+        source_type = str(metadata.get("source_type", "pdf")).strip().lower()
+        if allowed_source_types and source_type not in allowed_source_types:
+            continue
+
+        course_id = metadata.get("course_id")
+        if allowed_course_ids:
+            if course_id in (None, "") and not include_global_docs:
+                continue
+            if course_id not in (None, "") and str(course_id).strip() not in allowed_course_ids:
+                continue
+
+        filtered.append(result)
+        if len(filtered) >= limit:
+            break
+
+    return filtered
 
 
 def _to_citations(results: List[dict]) -> List[Citation]:
@@ -146,6 +210,7 @@ def _to_citations(results: List[dict]) -> List[Citation]:
                 excerpt=excerpt,
                 source_type=source_type,
                 url=url,
+                course_id=metadata.get("course_id"),
             )
         )
     return citations
@@ -156,9 +221,13 @@ def answer_question(payload: ChatRequest) -> ChatResponse:
     client = get_openai_client(settings)
     collection = get_collection()
 
-    embedding = embed_query(payload.question)
-
-    raw_results = query_collection(collection=collection, embedding=embedding, n_results=4)
+    try:
+        raw_results = _fetch_retrieval_results(collection, payload)
+    except Exception as exc:  # noqa: BLE001
+        return ChatResponse(
+            answer=_retrieval_error_message(exc),
+            citations=[],
+        )
 
     if not raw_results:
         return ChatResponse(
@@ -167,7 +236,7 @@ def answer_question(payload: ChatRequest) -> ChatResponse:
         )
 
     context = _format_context(raw_results)
-    messages = _build_prompt(payload.question, context)
+    messages = _build_prompt(payload.question, context, payload.context_prompt)
     chat_completion = client.chat.completions.create(
         model=settings.chat_model,
         messages=messages,
@@ -220,8 +289,11 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
     client = get_openai_client(settings)
     collection = get_collection()
 
-    embedding = embed_query(payload.question)
-    raw_results = query_collection(collection=collection, embedding=embedding, n_results=4)
+    try:
+        raw_results = _fetch_retrieval_results(collection, payload)
+    except Exception as exc:  # noqa: BLE001
+        yield _encode_event({"type": "error", "message": _retrieval_error_message(exc)})
+        return
 
     if not raw_results:
         _answer_cache.set(
@@ -246,7 +318,7 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
         yield _encode_event({"type": "references", "citations": citations})
 
     context = _format_context(raw_results)
-    messages = _build_prompt(payload.question, context)
+    messages = _build_prompt(payload.question, context, payload.context_prompt)
 
     answer_parts: List[str] = []
 

@@ -15,6 +15,7 @@ from app.services.document_store import DocumentStore
 from app.services.video_store import VideoStore
 from app.services.ingestion import ingest_document, ingest_web_page
 from app.services.retrieval import stream_answer, answer_question
+from app.services.vectorstore import get_collection
 from app.services.sms_service import send_sms_response, parse_incoming_sms
 # from app.whatsapp_chat import app as whatsapp_app
 from starlette.requests import Request
@@ -57,6 +58,36 @@ def _resolve_document_path(document_id: str, store: DocumentStore) -> tuple[Docu
     return summary, matches[0]
 
 
+def _remove_document_assets(document_id: str) -> None:
+    patterns = (f"{document_id}_*", f"{document_id}.txt")
+    for pattern in patterns:
+        for path in settings.uploads_path.glob(pattern):
+            if not path.is_file():
+                continue
+            try:
+                path.unlink()
+            except OSError:
+                continue
+
+
+def _delete_document_by_id(document_id: str, store: DocumentStore) -> DocumentSummary:
+    summary = store.get(document_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    collection = get_collection()
+    try:
+        collection.delete(where={"document_id": document_id})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Failed to remove document from vector index: {exc}") from exc
+
+    if not store.delete(document_id):
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    _remove_document_assets(document_id)
+    return summary
+
+
 @app.get("/", response_class=HTMLResponse)
 @app.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request) -> HTMLResponse:
@@ -81,14 +112,41 @@ def sms_admin_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/api/documents", response_model=list[DocumentSummary])
-def list_documents(store: DocumentStore = Depends(get_document_store)) -> list[DocumentSummary]:
-    return store.list()
+def list_documents(
+    course_id: Optional[List[str]] = Query(None),
+    source_type: Optional[List[str]] = Query(None),
+    include_global: bool = Query(True),
+    store: DocumentStore = Depends(get_document_store),
+) -> list[DocumentSummary]:
+    documents = store.list()
+
+    allowed_courses = {str(item).strip() for item in (course_id or []) if str(item).strip()}
+    allowed_sources = {str(item).strip().lower() for item in (source_type or []) if str(item).strip()}
+
+    filtered: list[DocumentSummary] = []
+    for doc in documents:
+        doc_source = (doc.source_type or "").strip().lower()
+        if allowed_sources and doc_source not in allowed_sources:
+            continue
+
+        doc_course = (doc.course_id or "").strip()
+        if allowed_courses:
+            if not doc_course and not include_global:
+                continue
+            if doc_course and doc_course not in allowed_courses:
+                continue
+
+        filtered.append(doc)
+
+    return filtered
 
 
 @app.post("/api/documents", response_model=UploadResponse)
 def upload_document(
     file: UploadFile = File(...),
     course_id: Optional[str] = Form(None),
+    source_type_hint: Optional[str] = Form(None),
+    external_ref: Optional[str] = Form(None),
 ) -> UploadResponse:
     contents = file.file.read()
     if not contents:
@@ -99,8 +157,30 @@ def upload_document(
         filename=file.filename,
         content_type=file.content_type,
         course_id=course_id,  # Pass course_id to your ingest function
+        source_type_hint=source_type_hint,
+        external_ref=external_ref,
     )
     return response
+
+
+@app.delete("/api/documents/{document_id}")
+def delete_document(document_id: str, store: DocumentStore = Depends(get_document_store)) -> dict:
+    summary = _delete_document_by_id(document_id, store)
+    return {
+        "deleted": True,
+        "document_id": summary.document_id,
+        "filename": summary.filename,
+    }
+
+
+@app.post("/api/documents/{document_id}/delete")
+def delete_document_compat(document_id: str, store: DocumentStore = Depends(get_document_store)) -> dict:
+    summary = _delete_document_by_id(document_id, store)
+    return {
+        "deleted": True,
+        "document_id": summary.document_id,
+        "filename": summary.filename,
+    }
 
 
 @app.post("/api/scrape", response_model=UploadResponse)
@@ -536,4 +616,3 @@ def delete_course(course_id: str):
         return {"message": "Course deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting course: {str(e)}")
-

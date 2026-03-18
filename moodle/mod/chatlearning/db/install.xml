@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<XMLDB PATH="mod/chatlearning/db" VERSION="20241020" COMMENT="ChatLearning module" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<XMLDB PATH="mod/chatlearning/db" VERSION="20260311" COMMENT="ChatLearning module" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <TABLES>
     <TABLE NAME="chatlearning" COMMENT="ChatLearning activity instances">
       <FIELDS>
@@ -11,6 +11,11 @@
         <FIELD NAME="contextprompt" TYPE="text" LENGTH="medium" NOTNULL="false" COMMENT="System prompt"/>
         <FIELD NAME="allowuploads" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" COMMENT="Allow uploads flag"/>
         <FIELD NAME="allowedmimetypes" TYPE="char" LENGTH="255" NOTNULL="false" COMMENT="Allowed MIME types"/>
+        <FIELD NAME="documentscope" TYPE="char" LENGTH="32" NOTNULL="true" DEFAULT="enrolledcourses" COMMENT="Allowed course scope for retrieval"/>
+        <FIELD NAME="allowglobaldocs" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" COMMENT="Allow global documents without course mapping"/>
+        <FIELD NAME="allowmoodlesync" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" COMMENT="Allow syncing Moodle files to the backend"/>
+        <FIELD NAME="sourcepdf" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" COMMENT="Enable PDF sources"/>
+        <FIELD NAME="sourcescorm" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" COMMENT="Enable SCORM sources"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="Creation time"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" COMMENT="Modification time"/>
       </FIELDS>

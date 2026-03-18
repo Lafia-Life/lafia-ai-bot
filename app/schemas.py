@@ -1,6 +1,6 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from enum import Enum
 
 
@@ -40,6 +40,7 @@ class ResourceType(str, Enum):
     VIDEO = "video"
     WEB = "web"
     IMAGE = "image"
+    SCORM = "scorm"
 
 class VideoResource(BaseModel):
     title: str
@@ -53,7 +54,8 @@ class DocumentSummary(BaseModel):
     page_count: int = 0
     source_type: str = "pdf"
     url: Optional[str] = None
-    course_id: Optional[str]=None
+    course_id: Optional[str] = None
+    external_ref: Optional[str] = None
 
 
 class UploadResponse(BaseModel):
@@ -104,6 +106,10 @@ class VideoUploadRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     conversation_id: Optional[str] = None
+    context_prompt: Optional[str] = None
+    allowed_course_ids: Optional[List[str]] = None
+    allowed_source_types: Optional[List[str]] = None
+    include_global_docs: bool = False
 
 
 class Citation(BaseModel):
@@ -116,6 +122,7 @@ class Citation(BaseModel):
     excerpt: str
     source_type: str = "pdf"
     url: Optional[str] = None
+    course_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -136,14 +143,13 @@ class ScrapeRequest(BaseModel):
 class SMSWebhookRequest(BaseModel):
     """Incoming SMS webhook from Africa's Talking"""
     to: str  # Your shortcode/number
-    from_: str  # Sender's phone number
+    from_: str = Field(alias="from")  # Sender's phone number
     text: str  # SMS message content
     date: str  # Timestamp
     id: str  # Message ID
     linkId: Optional[str] = None
 
-    class Config:
-        fields = {"from_": "from"}
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SMSResponse(BaseModel):

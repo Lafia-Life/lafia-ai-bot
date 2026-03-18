@@ -10,6 +10,8 @@ This Moodle activity module embeds the ChatLearning FastAPI experience directly 
 - Admin-configurable FastAPI host and authorization key.
 - AJAX bridge that proxies Moodle user/course identity to the backend.
 - AMD front-end that mirrors the current web UI for uploading, searching, and chatting.
+- Enrollment-aware document scope options (current course, enrolled courses, or all courses for managers).
+- Moodle sync action for importing `PDF` resources and `SCORM` package ZIP files.
 
 ## Getting Started
 

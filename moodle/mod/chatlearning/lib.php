@@ -7,7 +7,10 @@ function chatlearning_supports($feature) {
     switch ($feature) {
         case FEATURE_MOD_INTRO:
         case FEATURE_SHOW_DESCRIPTION:
+        case FEATURE_CAN_DISPLAY:
             return true;
+        case FEATURE_MOD_PURPOSE:
+            return MOD_PURPOSE_COMMUNICATION;
         case FEATURE_MOD_ARCHETYPE:
             return MOD_ARCHETYPE_OTHER;
         case FEATURE_BACKUP_MOODLE2:
@@ -21,7 +24,7 @@ function chatlearning_supports($feature) {
     }
 }
 
-function chatlearning_add_instance(stdClass $data, mod_chatlearning_mod_form $mform = null) {
+function chatlearning_add_instance(stdClass $data, ?mod_chatlearning_mod_form $mform = null) {
     global $DB;
 
     $data->timecreated = time();
@@ -30,6 +33,11 @@ function chatlearning_add_instance(stdClass $data, mod_chatlearning_mod_form $mf
     $data->contextprompt = $data->contextprompt ?? '';
     $data->allowuploads = (int)($data->allowuploads ?? 1);
     $data->allowedmimetypes = $data->allowedmimetypes ?? '';
+    $data->documentscope = $data->documentscope ?? 'enrolledcourses';
+    $data->allowglobaldocs = (int)($data->allowglobaldocs ?? 0);
+    $data->allowmoodlesync = (int)($data->allowmoodlesync ?? 1);
+    $data->sourcepdf = (int)($data->sourcepdf ?? 1);
+    $data->sourcescorm = (int)($data->sourcescorm ?? 1);
 
     if (!empty($data->introeditor)) {
         $data->intro = $data->introeditor['text'];
@@ -39,7 +47,7 @@ function chatlearning_add_instance(stdClass $data, mod_chatlearning_mod_form $mf
     return $DB->insert_record('chatlearning', $data);
 }
 
-function chatlearning_update_instance(stdClass $data, mod_chatlearning_mod_form $mform = null) {
+function chatlearning_update_instance(stdClass $data, ?mod_chatlearning_mod_form $mform = null) {
     global $DB;
 
     $record = $DB->get_record('chatlearning', ['id' => $data->instance], '*', MUST_EXIST);
@@ -49,6 +57,11 @@ function chatlearning_update_instance(stdClass $data, mod_chatlearning_mod_form 
     $record->contextprompt = $data->contextprompt ?? '';
     $record->allowuploads = (int)($data->allowuploads ?? 1);
     $record->allowedmimetypes = $data->allowedmimetypes ?? '';
+    $record->documentscope = $data->documentscope ?? 'enrolledcourses';
+    $record->allowglobaldocs = (int)($data->allowglobaldocs ?? 0);
+    $record->allowmoodlesync = (int)($data->allowmoodlesync ?? 1);
+    $record->sourcepdf = (int)($data->sourcepdf ?? 1);
+    $record->sourcescorm = (int)($data->sourcescorm ?? 1);
 
     if (!empty($data->introeditor)) {
         $record->intro = $data->introeditor['text'];
@@ -90,8 +103,8 @@ function chatlearning_get_coursemodule_info($coursemodule) {
 
     $info->customdata = (object)[
         'allowuploads' => (bool)$record->allowuploads,
+        'documentscope' => $record->documentscope ?? 'enrolledcourses',
     ];
 
     return $info;
 }
-

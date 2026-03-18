@@ -31,6 +31,24 @@ $functions = [
         'capabilities' => 'mod/chatlearning:manage',
         'ajax' => true,
     ],
+    'mod_chatlearning_delete_document' => [
+        'classname' => 'mod_chatlearning\external\api',
+        'methodname' => 'delete_document',
+        'classpath' => '',
+        'description' => 'Delete an indexed document from the backend.',
+        'type' => 'write',
+        'capabilities' => 'mod/chatlearning:manage',
+        'ajax' => true,
+    ],
+    'mod_chatlearning_sync_moodle_documents' => [
+        'classname' => 'mod_chatlearning\external\api',
+        'methodname' => 'sync_moodle_documents',
+        'classpath' => '',
+        'description' => 'Sync Moodle PDFs and SCORM packages for allowed courses.',
+        'type' => 'write',
+        'capabilities' => 'mod/chatlearning:manage',
+        'ajax' => true,
+    ],
 ];
 
 $services = [

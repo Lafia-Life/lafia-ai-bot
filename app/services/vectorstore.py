@@ -2,13 +2,17 @@ from typing import Iterable, List, Sequence
 
 import chromadb
 from chromadb.api.models.Collection import Collection
+from chromadb.config import Settings as ChromaSettings
 
 from app.config import get_settings
 
 
 def get_collection() -> Collection:
     settings = get_settings()
-    client = chromadb.PersistentClient(path=str(settings.chroma_path))
+    client = chromadb.PersistentClient(
+        path=str(settings.chroma_path),
+        settings=ChromaSettings(anonymized_telemetry=False),
+    )
     collection = client.get_or_create_collection(name="documents")
     return collection
 
