@@ -1,23 +1,27 @@
 {
-  "total_requests": 6000,
-  "success": 3157,
-  "errors": 2843,
-  "error_rate": 0.47383333333333333,
-  "duration_s": 203.3453995410091,
-  "throughput_rps": 29.506445749661363,
-  "latency_p50_ms": 7897.239124999032,
-  "latency_p90_ms": 10009.918583004037,
-  "latency_p95_ms": 10232.991582990508,
-  "latency_p99_ms": 14043.070333005744,
-  "latency_max_ms": 20565.246915997704,
+  "total_requests": 5500,
+  "success": 2846,
+  "errors": 2654,
+  "error_rate": 0.48254545454545456,
+  "duration_s": 177.90858191699954,
+  "throughput_rps": 30.91475375013634,
+  "latency_p50_ms": 7695.245833005174,
+  "latency_p90_ms": 10046.120458006044,
+  "latency_p95_ms": 10113.679208996473,
+  "latency_p99_ms": 10334.922791007557,
+  "latency_max_ms": 11413.591499993345,
   "status_counts": {
-    "200": 3157,
-    "exception": 2843
+    "200": 2846,
+    "exception": 2654
   },
   "top_errors": [
     {
       "key": "<urlopen error timed out>",
-      "count": 2843
+      "count": 2653
+    },
+    {
+      "key": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+      "count": 1
     }
   ]
 }
