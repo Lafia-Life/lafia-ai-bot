@@ -1,0 +1,23 @@
+{
+  "total_requests": 1000,
+  "success": 128,
+  "errors": 872,
+  "error_rate": 0.872,
+  "duration_s": 12.320011292002164,
+  "throughput_rps": 81.1687567729077,
+  "latency_p50_ms": 10308.117749998928,
+  "latency_p90_ms": 10789.907416998176,
+  "latency_p95_ms": 10931.794042000547,
+  "latency_p99_ms": 11383.703292012797,
+  "latency_max_ms": 12131.654250013526,
+  "status_counts": {
+    "200": 128,
+    "exception": 872
+  },
+  "top_errors": [
+    {
+      "key": "<urlopen error timed out>",
+      "count": 872
+    }
+  ]
+}

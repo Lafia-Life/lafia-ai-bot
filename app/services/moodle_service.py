@@ -4,6 +4,8 @@ from pathlib import Path
 import requests
 import threading
 import time
+import asyncio
+import httpx
 import urllib.parse
 import json
 from urllib.parse import urlparse, parse_qs, urlencode
@@ -18,6 +20,36 @@ CACHE_DURATION = 300
 courses_cache_timestamp = 0
 MOODLE_BASE_URL = os.getenv("MOODLE_BASE_URL")
 MOODLE_TOKEN = os.getenv("MOODLE_TOKEN")
+MOODLE_HTTP_MAX_CONN = int(os.getenv("MOODLE_HTTP_MAX_CONN", "100"))
+MOODLE_HTTP_KEEPALIVE = int(os.getenv("MOODLE_HTTP_KEEPALIVE", "20"))
+MOODLE_HTTP_TIMEOUT = float(os.getenv("MOODLE_HTTP_TIMEOUT", "15"))
+
+_async_client = None
+_async_client_lock = asyncio.Lock()
+
+
+async def _get_async_client() -> httpx.AsyncClient:
+    global _async_client
+    if _async_client is None:
+        async with _async_client_lock:
+            if _async_client is None:
+                limits = httpx.Limits(
+                    max_connections=MOODLE_HTTP_MAX_CONN,
+                    max_keepalive_connections=MOODLE_HTTP_KEEPALIVE,
+                )
+                _async_client = httpx.AsyncClient(
+                    verify=False,
+                    timeout=MOODLE_HTTP_TIMEOUT,
+                    limits=limits,
+                )
+    return _async_client
+
+
+async def close_async_client():
+    global _async_client
+    if _async_client is not None:
+        await _async_client.aclose()
+        _async_client = None
 
 
 def _set_last_course_sync_error(code: str, message: str):
@@ -74,6 +106,51 @@ def get_moodle_courses():
         return courses_dict  
     
     except requests.exceptions.RequestException as e:
+        _set_last_course_sync_error("network_error", str(e))
+        print(f"❌ Network error fetching Moodle courses: {e}")
+        return {}
+    except ValueError as e:
+        _set_last_course_sync_error("json_error", str(e))
+        print(f"❌ JSON parsing error from Moodle API: {e}")
+        return {}
+    except Exception as e:
+        _set_last_course_sync_error("unexpected_error", str(e))
+        print(f"❌ Unexpected error fetching Moodle courses: {e}")
+        return {}
+
+
+async def get_moodle_courses_async():
+    """Fetch courses from Moodle API (async)."""
+    url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+    parameters = {
+        "wstoken": MOODLE_TOKEN,
+        "wsfunction": "core_course_get_courses",
+        "moodlewsrestformat": "json"
+    }
+    try:
+        client = await _get_async_client()
+        response = await client.get(url, params=parameters)
+        response.raise_for_status()
+        courses = response.json()
+
+        if isinstance(courses, dict) and courses.get('exception'):
+            print(f"Moodle API error: {courses.get('message', 'Unknown error')}")
+            return {}
+
+        courses_dict = {}
+        for course in courses:
+            course_id = str(course.get('id'))
+            courses_dict[course_id] = {
+                'id': course_id,
+                'name': course.get('fullname', 'Unnamed Course'),
+                'shortname': course.get('shortname', ''),
+                'summary': course.get('summary', ''),
+                'categoryid': course.get('categoryid', ''),
+            }
+
+        return courses_dict
+
+    except httpx.RequestError as e:
         _set_last_course_sync_error("network_error", str(e))
         print(f"❌ Network error fetching Moodle courses: {e}")
         return {}
@@ -191,6 +268,109 @@ def get_moodle_course_contents(course_id: str):
         traceback.print_exc()
         return {"course_id": course_id, "sections": [], "error": error_msg}
 
+
+async def get_moodle_course_contents_async(course_id: str):
+    """Fetch course contents from Moodle API with proper error handling (async)."""
+    url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+    params = {
+        "wstoken": MOODLE_TOKEN,
+        "wsfunction": "core_course_get_contents",
+        "courseid": course_id,
+        "moodlewsrestformat": "json",
+    }
+
+    try:
+        client = await _get_async_client()
+        response = await client.get(url, params=params, timeout=30)
+
+        if response.status_code != 200:
+            error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+            print(f"❌ API error: {error_msg}")
+            return {"course_id": course_id, "sections": [], "error": error_msg}
+
+        try:
+            sections_data = response.json()
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid JSON response: {str(e)}"
+            print(f"❌ {error_msg}")
+            print(f"Response text: {response.text[:200]}")
+            return {"course_id": course_id, "sections": [], "error": error_msg}
+
+        if isinstance(sections_data, dict) and sections_data.get('exception'):
+            error_msg = f"Moodle API error: {sections_data.get('message', 'Unknown error')}"
+            print(f"❌ {error_msg}")
+            return {"course_id": course_id, "sections": [], "error": error_msg}
+
+        sections = []
+        for section in sections_data:
+            section_obj = {
+                "id": section.get("id"),
+                "name": section.get("name") or "Untitled Section",
+                "videos": [],
+                "pdfs": [],
+                "powerpoints": [],
+                "quizzes": [],
+            }
+
+            for module in section.get("modules", []):
+                module_name = module.get("name", "Untitled")
+                module_type = module.get("modname")
+                module_cmid = module.get("id")
+
+                if module_type == "quiz":
+                    quiz_obj = {
+                        "title": module_name,
+                        "cmid": module_cmid,
+                        "course_id": course_id,
+                        "instance": module.get("instance"),
+                        "url": module.get("url")
+                    }
+                    section_obj["quizzes"].append(quiz_obj)
+
+                for content in module.get("contents", []):
+                    file_url = content.get("fileurl")
+                    mimetype = content.get("mimetype")
+                    filename = content.get("filename")
+
+                    if not file_url or not mimetype:
+                        continue
+
+                    file_obj = {
+                        "title": module_name,
+                        "filename": filename,
+                        "url": file_url,
+                        "mimetype": mimetype,
+                        "cmid": module_cmid,
+                        "course_id": course_id,
+                    }
+
+                    if mimetype.startswith("video/"):
+                        section_obj["videos"].append(file_obj)
+                    elif mimetype == "application/pdf":
+                        section_obj["pdfs"].append(file_obj)
+                    elif any(ppt in mimetype for ppt in [
+                        "powerpoint",
+                        "presentation",
+                        "vnd.ms-powerpoint",
+                        "vnd.openxmlformats-officedocument.presentationml"
+                    ]):
+                        section_obj["powerpoints"].append(file_obj)
+
+            sections.append(section_obj)
+
+        return {"course_id": course_id, "sections": sections}
+
+    except httpx.RequestError as e:
+        error_msg = f"Network error: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {"course_id": course_id, "sections": [], "error": error_msg}
+    except Exception as e:
+        error_msg = f"Unexpected error: {str(e)}"
+        print(f"❌ {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {"course_id": course_id, "sections": [], "error": error_msg}
+
 def preload_courses_background():
     """Preload all courses and contents every CACHE_DURATION seconds."""
     global courses_cache, courses_cache_timestamp
@@ -255,6 +435,66 @@ def get_available_courses(force_refresh=False):
             print(f"❌ Failed to load course {course['name']}: {e}")
 
     # Update cache
+    with cache_lock:
+        courses_cache = courses
+        courses_cache_timestamp = current_time
+
+    return courses
+
+
+async def get_available_courses_async(force_refresh: bool = False):
+    """Return Moodle courses with full content, using cache if available (async)."""
+    global courses_cache, courses_cache_timestamp
+
+    current_time = time.time()
+
+    if not force_refresh:
+        with cache_lock:
+            if courses_cache and (current_time - courses_cache_timestamp < CACHE_DURATION):
+                return courses_cache.copy()
+
+    moodle_courses = await get_moodle_courses_async()
+    courses: dict = {}
+
+    concurrency = int(os.getenv("MOODLE_CONTENTS_CONCURRENCY", "5"))
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def build_course(course_id, course):
+        async with semaphore:
+            try:
+                contents = await get_moodle_course_contents_async(course_id)
+                course_pdfs = []
+                course_videos = []
+                course_powerpoints = []
+                course_quizzes = []
+
+                for section in contents.get("sections", []):
+                    course_pdfs.extend(section.get("pdfs", []))
+                    course_videos.extend(section.get("videos", []))
+                    course_powerpoints.extend(section.get("powerpoints", []))
+                    course_quizzes.extend(section.get("quizzes", []))
+
+                return course_id, {
+                    "id": course_id,
+                    "name": course["name"],
+                    "pdfs": course_pdfs,
+                    "videos": course_videos,
+                    "powerpoints": course_powerpoints,
+                    "sections": contents.get("sections", []),
+                    "quizzes": course_quizzes,
+                }
+            except Exception as e:
+                print(f"❌ Failed to load course {course.get('name', course_id)}: {e}")
+                return None
+
+    tasks = [build_course(course_id, course) for course_id, course in moodle_courses.items()]
+    results = await asyncio.gather(*tasks, return_exceptions=False)
+    for item in results:
+        if not item:
+            continue
+        course_id, course_data = item
+        courses[course_id] = course_data
+
     with cache_lock:
         courses_cache = courses
         courses_cache_timestamp = current_time
@@ -423,6 +663,47 @@ def get_user_enrolled_courses_moodle(token: str, userid: int):
         print(f"❌ Error getting enrolled courses: {e}")
         return []
 
+
+async def get_user_enrolled_courses_moodle_async(token: str, userid: int):
+    """Get user's enrolled courses (async)."""
+    try:
+        ws_url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+        params = {
+            'wstoken': token,
+            'wsfunction': 'core_enrol_get_users_courses',
+            'userid': userid,
+            'moodlewsrestformat': 'json'
+        }
+
+        client = await _get_async_client()
+        response = await client.post(ws_url, data=params, timeout=15)
+
+        if response.status_code == 200:
+            courses = response.json()
+            if isinstance(courses, list):
+                simplified = []
+                for course in courses:
+                    if isinstance(course, dict):
+                        simplified.append({
+                            'id': course.get('id'),
+                            'name': course.get('fullname', 'Unnamed Course'),
+                            'shortname': course.get('shortname', ''),
+                            'summary': course.get('summary', '')[:200]
+                        })
+                return simplified
+            if isinstance(courses, dict) and courses.get('exception'):
+                print(f"⚠️ Moodle API error: {courses.get('message')}")
+                return []
+            print(f"⚠️ Unexpected response format: {type(courses)}")
+            return []
+
+        print(f"❌ HTTP error: {response.status_code}")
+        return []
+
+    except Exception as e:
+        print(f"❌ Error getting enrolled courses: {e}")
+        return []
+
 def get_user_not_enrolled_courses(token: str, userid: int):
     """Get courses user is NOT enrolled in"""
     try:
@@ -471,6 +752,25 @@ def get_course_contents_moodle(token: str, course_id: int):
         }
         
         response = requests.post(ws_url, data=params, verify=False, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        print(f"❌ Error getting course contents: {e}")
+    return []
+
+
+async def get_course_contents_moodle_async(token: str, course_id: int):
+    """Get all contents from a course (async)."""
+    try:
+        ws_url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+        params = {
+            'wstoken': token,
+            'wsfunction': 'core_course_get_contents',
+            'courseid': course_id,
+            'moodlewsrestformat': 'json'
+        }
+        client = await _get_async_client()
+        response = await client.post(ws_url, data=params, timeout=10)
         if response.status_code == 200:
             return response.json()
     except Exception as e:
@@ -836,6 +1136,88 @@ def enroll_user_in_course(token: str, userid: int, courseid: int):
         traceback.print_exc()
         return False
 
+
+async def enroll_user_in_course_async(token: str, userid: int, courseid: int):
+    """
+    Enroll a user in a Moodle course (async).
+    """
+    try:
+        if await is_user_enrolled_in_course_async(token, userid, courseid):
+            return True
+
+        ws_url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+        params = {
+            'wstoken': token,
+            'wsfunction': 'enrol_self_enrol_user',
+            'moodlewsrestformat': 'json',
+            'courseid': courseid,
+        }
+
+        try:
+            client = await _get_async_client()
+            response = await client.post(ws_url, data=params, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if data is True:
+                    return True
+                if isinstance(data, dict) and data.get('warnings'):
+                    for warning in data.get('warnings', []):
+                        if 'Enrolment is disabled or inactive' in warning.get('message', ''):
+                            print("   ℹ️ Self-enrollment is disabled for this course")
+        except httpx.ReadTimeout:
+            print("   ⏱️ Self-enrollment timeout")
+        except Exception as e:
+            print(f"   ⚠️ Self-enrollment error: {e}")
+
+        # METHOD 2: Use admin token for manual enrollment
+        success = await enroll_user_in_course_admin_async(userid, courseid)
+        if success:
+            await asyncio.sleep(2)
+            if await is_user_enrolled_in_course_async(token, userid, courseid):
+                print(f"   ✅ VERIFIED: User is now enrolled in course {courseid}")
+            else:
+                print("   ⚠️ Enrollment might need time to propagate in Moodle")
+            return True
+
+        print("   ❌ Admin enrollment also failed")
+        return False
+
+    except Exception as e:
+        print(f"   ❌ EXCEPTION in enrollment: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+async def enroll_user_in_course_admin_async(userid: int, courseid: int, roleid: int = 5):
+    """Enroll a user using ADMIN TOKEN (async)."""
+    try:
+        ws_url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+        params = {
+            'wstoken': MOODLE_TOKEN,
+            'wsfunction': 'enrol_manual_enrol_users',
+            'moodlewsrestformat': 'json',
+            'enrolments[0][roleid]': roleid,
+            'enrolments[0][userid]': userid,
+            'enrolments[0][courseid]': courseid,
+        }
+
+        client = await _get_async_client()
+        response = await client.post(ws_url, data=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data is True or data == []:
+                return True
+            if isinstance(data, dict) and data.get('exception'):
+                print(f"   ❌ Admin enrollment error: {data.get('message')}")
+                return False
+            return True
+        print(f"   ❌ Admin enrollment HTTP error: {response.status_code}")
+        return False
+    except Exception as e:
+        print(f"   ❌ Admin enrollment error: {e}")
+        return False
+
 def enroll_user_in_course_admin(userid: int, courseid: int, roleid: int = 5):
     """
     Enroll a user using ADMIN TOKEN (manual enrollment)
@@ -920,6 +1302,17 @@ def is_user_enrolled_in_course(token: str, userid: int, courseid: int):
     """Check if user is already enrolled in a course"""
     try:
         enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+        course_ids = [course['id'] for course in enrolled_courses]
+        return courseid in course_ids
+    except Exception as e:
+        print(f"❌ Error checking enrollment: {e}")
+        return False
+
+
+async def is_user_enrolled_in_course_async(token: str, userid: int, courseid: int):
+    """Check if user is already enrolled in a course (async)."""
+    try:
+        enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
         course_ids = [course['id'] for course in enrolled_courses]
         return courseid in course_ids
     except Exception as e:
@@ -1011,6 +1404,74 @@ def authenticate_moodle_user(username: str, password: str):
         return None
     except requests.exceptions.ConnectionError:
         print(f"   ❌ Connection error to Moodle")
+        return None
+    except Exception as e:
+        print(f"   ❌ Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+async def authenticate_moodle_user_async(username: str, password: str):
+    """Authenticate user (async)."""
+    try:
+        login_url = f"{MOODLE_BASE_URL}/login/token.php"
+        client = await _get_async_client()
+        response = await client.post(
+            login_url,
+            data={
+                'username': username,
+                'password': password,
+                'service': 'moodle_mobile_app'
+            },
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            print(f"   ❌ HTTP error: {response.text[:200]}")
+            return None
+
+        data = response.json()
+        token = data.get('token')
+        if not token:
+            print(f"   ❌ No token returned: {data}")
+            return None
+
+        ws_url = f"{MOODLE_BASE_URL}/webservice/rest/server.php"
+        params = {
+            'wstoken': token,
+            'wsfunction': 'core_user_get_users_by_field',
+            'field': 'username',
+            'values[0]': username,
+            'moodlewsrestformat': 'json'
+        }
+
+        user_response = await client.post(ws_url, data=params, timeout=15)
+        if user_response.status_code == 200:
+            user_data = user_response.json()
+            if isinstance(user_data, list) and len(user_data) > 0:
+                user = user_data[0]
+                userid = user.get('id')
+                if not userid:
+                    print("   ❌ No user ID")
+                    return None
+                return {
+                    'token': token,
+                    'userid': userid,
+                    'username': username,
+                    'fullname': f"{user.get('firstname', '')} {user.get('lastname', '')}".strip(),
+                    'email': user.get('email', ''),
+                    'authenticated_at': time.time()
+                }
+
+        print("   ❌ Failed to get user info")
+        return None
+
+    except httpx.ReadTimeout:
+        print("   ❌ Timeout connecting to Moodle")
+        return None
+    except httpx.ConnectError:
+        print("   ❌ Connection error to Moodle")
         return None
     except Exception as e:
         print(f"   ❌ Exception: {e}")
