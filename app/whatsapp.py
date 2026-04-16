@@ -5,18 +5,21 @@ import hashlib
 import os
 import mimetypes
 import json
+import functools
 import subprocess
 import tempfile
 import shutil
 import subprocess
 from openai import base_url
 import requests
+from concurrent.futures import ThreadPoolExecutor
+from twilio.rest import Client as TwilioClient
 from fastapi import APIRouter, Form, Response, HTTPException, Query, Request,FastAPI  
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.schemas import ChatRequest
-from app.services.retrieval import answer_question
+from app.services.retrieval import answer_question, answer_question_async
 from datetime import datetime 
 from app.services.document_store import DocumentStore
 from app.services.video_store import VideoStore
@@ -27,17 +30,24 @@ import asyncio
 import threading
 from app.services.moodle_service import (
     get_available_courses, 
+    get_available_courses_async,
     clear_courses_cache,
     start_preload_worker,
+    close_async_client,
     normalize_moodle_file_url,
     authenticate_moodle_user,
+    authenticate_moodle_user_async,
     get_user_enrolled_courses_moodle,
+    get_user_enrolled_courses_moodle_async,
     get_user_not_enrolled_courses,
     get_course_contents_moodle,
+    get_course_contents_moodle_async,
     extract_moodle_resources,
     enroll_user_in_course,
+    enroll_user_in_course_async,
     get_moodle_user_id,
     is_user_enrolled_in_course,
+    is_user_enrolled_in_course_async,
     create_generic_content_response, 
     create_course_overview,          
     format_file_size,               
@@ -77,6 +87,148 @@ user_moodle_data = {}
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 BASE_URL = os.getenv("BASE_URL")
 twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+BLOCKING_MAX_WORKERS = int(os.getenv("WHATSAPP_BLOCKING_MAX_WORKERS", "100"))
+BLOCKING_EXECUTOR = ThreadPoolExecutor(max_workers=BLOCKING_MAX_WORKERS)
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
+WHATSAPP_ASYNC_QA = os.getenv("WHATSAPP_ASYNC_QA", "0").strip().lower() in {"1", "true", "yes", "on"}
+WHATSAPP_ASYNC_VIDEO = os.getenv("WHATSAPP_ASYNC_VIDEO", "0").strip().lower() in {"1", "true", "yes", "on"}
+WHATSAPP_OUTBOUND_WORKERS = int(os.getenv("WHATSAPP_OUTBOUND_WORKERS", "2"))
+
+OUTBOUND_QUEUE = asyncio.Queue()
+
+async def run_blocking(func, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    bound = functools.partial(func, *args, **kwargs)
+    return await loop.run_in_executor(BLOCKING_EXECUTOR, bound)
+
+
+def _twilio_ready() -> bool:
+    return bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_NUMBER)
+
+
+def _format_whatsapp_number(value: str) -> str:
+    number = (value or "").strip()
+    if not number:
+        return number
+    if number.startswith("whatsapp:"):
+        return number
+    return f"whatsapp:{number}"
+
+
+async def _send_whatsapp_message(phone: str, body: str) -> bool:
+    if not _twilio_ready():
+        print("⚠️ Twilio not configured; skipping async send.")
+        return False
+    client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    to_number = _format_whatsapp_number(phone)
+    from_number = _format_whatsapp_number(TWILIO_WHATSAPP_NUMBER)
+    try:
+        await run_blocking(
+            client.messages.create,
+            body=body,
+            from_=from_number,
+            to=to_number,
+        )
+        return True
+    except Exception as e:
+        print(f"❌ Twilio send failed: {e}")
+        return False
+
+
+async def _send_whatsapp_media(phone: str, body: str, media_url: str) -> bool:
+    if not _twilio_ready():
+        print("⚠️ Twilio not configured; skipping async media send.")
+        return False
+    client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    to_number = _format_whatsapp_number(phone)
+    from_number = _format_whatsapp_number(TWILIO_WHATSAPP_NUMBER)
+    try:
+        await run_blocking(
+            client.messages.create,
+            body=body,
+            from_=from_number,
+            to=to_number,
+            media_url=[media_url],
+        )
+        return True
+    except Exception as e:
+        print(f"❌ Twilio media send failed: {e}")
+        return False
+
+
+async def _outbound_worker():
+    while True:
+        task = await OUTBOUND_QUEUE.get()
+        try:
+            if task.get("type") == "qa":
+                payload = task["payload"]
+                phone = task["phone"]
+                chat_response = await answer_question_async(payload)
+                response_text = localize(
+                    phone,
+                    f"🤖 {chat_response.answer}\n\nAsk another question, or reply 0 for main menu.",
+                    f"🤖 {chat_response.answer}\n\nBuuza ekibuuzo ekirala, oba ddamu ne 0 okudda ku main menu."
+                )
+                await _send_whatsapp_message(phone, response_text)
+            elif task.get("type") == "video_download":
+                phone = task["phone"]
+                course_name = task.get("course_name", "Course")
+                course_id = task.get("course_id")
+                token = task.get("token")
+                video_urls = task.get("video_urls", [])
+                base_url = task.get("base_url") or BASE_URL
+
+                await _send_whatsapp_message(
+                    phone,
+                    localize(
+                        phone,
+                        f"⏳ Starting download of {len(video_urls)} video(s) for {course_name}.",
+                        f"⏳ Nkka vidiyo {len(video_urls)} ez'essomo {course_name}."
+                    ),
+                )
+
+                for video in video_urls:
+                    video_title = video.get('title', 'Video')
+                    video_url = video.get('url', '')
+                    if not video_url:
+                        continue
+                    try:
+                        local_path = await run_blocking(
+                            download_and_store_video,
+                            video_url,
+                            course_id,
+                            video_title,
+                            token,
+                        )
+                        if local_path and base_url:
+                            filename = os.path.basename(local_path)
+                            server_url = f"{base_url}/webhook/serve-video/{quote(filename)}"
+                            await _send_whatsapp_media(phone, f"🎥 {video_title}", server_url)
+                        else:
+                            await _send_whatsapp_message(
+                                phone,
+                                localize(
+                                    phone,
+                                    f"⚠️ Could not attach {video_title}. Link: {video_url}",
+                                    f"⚠️ Sisobode okusibira {video_title}. Link: {video_url}",
+                                ),
+                            )
+                    except Exception as e:
+                        print(f"❌ Video download task error: {e}")
+                        await _send_whatsapp_message(
+                            phone,
+                            localize(
+                                phone,
+                                f"⚠️ Error downloading {video_title}. Link: {video_url}",
+                                f"⚠️ Wabaddewo obuzibu mu kka {video_title}. Link: {video_url}",
+                            ),
+                        )
+        except Exception as e:
+            print(f"❌ Outbound worker error: {e}")
+        finally:
+            OUTBOUND_QUEUE.task_done()
 
 def escape_xml(text: str) -> str:
     return (text.replace('&', '&amp;')
@@ -719,6 +871,7 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
 
             print("\nDownloading...")
             get_response = requests.get(download_url, headers=headers, stream=True, timeout=60, verify=False)
+            print("download response",get_response)
             if get_response.status_code != 200:
                 print(f"Video download failed (GET {get_response.status_code})")
                 continue
@@ -856,7 +1009,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
             return Response(content=raw_xml, media_type="application/xml")
         password = raw_msg  # RAW, NOT lowercased
 
-        auth_result = authenticate_moodle_user(username, password)
+        auth_result = await authenticate_moodle_user_async(username, password)
 
         if not auth_result:
             user_state[phone] = "moodle_username"
@@ -886,7 +1039,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 # Get enrolled courses
                 token = auth_result['token']
                 userid = auth_result['userid']
-                enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
                 user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
                 
                 if not enrolled_courses:
@@ -929,7 +1082,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 # Get enrolled courses
                 token = auth_result['token']
                 userid = auth_result['userid']
-                enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
                 user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
                 
                 if not enrolled_courses:
@@ -959,7 +1112,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 course_id = intent['course_id']
                 
                 # Get course details
-                courses = get_available_courses()
+                courses = await get_available_courses_async()
                 course_data = courses.get(str(course_id), {})
                 
                 if not course_data:
@@ -971,7 +1124,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 # Check enrollment
                 token = auth_result['token']
                 userid = auth_result['userid']
-                is_enrolled = is_user_enrolled_in_course(token, userid, course_id)
+                is_enrolled = await is_user_enrolled_in_course_async(token, userid, course_id)
                 
                 # Clear intent
                 user_moodle_data[phone].pop('original_intent', None)
@@ -980,8 +1133,8 @@ async def handle_moodle_login_flow(phone, raw_msg):
                     user_state[phone] = f"enrolled_{course_id}"
                     # Get fresh resources with user's token
                     token = user_moodle_data[phone]['token']
-                    contents = get_course_contents_moodle(token, int(course_id))
-                    resources = extract_moodle_resources(contents, token)
+                    contents = await get_course_contents_moodle_async(token, int(course_id))
+                    resources = await run_blocking(extract_moodle_resources, contents, token)
                     
                     # FIXED: Correct the print statements
                     print("\n" + "="*50)
@@ -1035,17 +1188,20 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 course_id = intent['course_id']
                 course_name = intent['course_name']
 
-                enrolled = enroll_user_in_course(
+                enrolled = await enroll_user_in_course_async(
                     token=auth_result['token'],
                     userid=auth_result['userid'],
-                    courseid=course_id
+                    courseid=course_id,
                 )
 
                 if enrolled:
                     # refresh enrolled courses
                     token = auth_result['token']
                     userid = auth_result['userid']
-                    user_moodle_data[phone]['enrolled_courses'] = get_user_enrolled_courses_moodle(token, userid)
+                    user_moodle_data[phone]['enrolled_courses'] = await get_user_enrolled_courses_moodle_async(
+                        token,
+                        userid,
+                    )
 
                     # clear intent
                     user_moodle_data[phone].pop('original_intent', None)
@@ -1059,8 +1215,8 @@ async def handle_moodle_login_flow(phone, raw_msg):
                     user_state[phone] = f"enrolled_{course_id}"
                     # Get fresh resources with user's token
                     token = user_moodle_data[phone]['token']
-                    contents = get_course_contents_moodle(token, int(course_id))
-                    resources = extract_moodle_resources(contents, token)
+                    contents = await get_course_contents_moodle_async(token, int(course_id))
+                    resources = await run_blocking(extract_moodle_resources, contents, token)
                     
                     # FIXED: Correct the print statements
                     print("\n" + "="*50)
@@ -1123,7 +1279,7 @@ async def handle_moodle_login_flow(phone, raw_msg):
     # ===== SAFETY NET =====
     return None
 
-def is_enrolled_live(phone, course_id):
+async def is_enrolled_live(phone, course_id):
     if phone not in user_moodle_data:
         return False
 
@@ -1133,7 +1289,7 @@ def is_enrolled_live(phone, course_id):
     if not token or not userid:
         return False
 
-    return is_user_enrolled_in_course(token, userid, int(course_id))
+    return await is_user_enrolled_in_course_async(token, userid, int(course_id))
 
 def main_menu_text(phone: str, first_time: bool = False):
     if first_time:
@@ -1241,6 +1397,13 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     user_msg = raw_msg.lower()
     phone = normalize_phone_key(From or "")
     base_url = BASE_URL
+    courses_cache_local = None
+
+    async def get_courses(force_refresh: bool = False):
+        nonlocal courses_cache_local
+        if force_refresh or courses_cache_local is None:
+            courses_cache_local = await get_available_courses_async(force_refresh=force_refresh)
+        return courses_cache_local
 
     # Twilio status callbacks may hit this webhook without message content.
     if not phone or not raw_msg:
@@ -1298,7 +1461,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     if user_msg in ["refresh", "reload", "sync"]:
         try:
             clear_courses_cache()
-            fresh_courses = get_available_courses(force_refresh=True)
+            fresh_courses = await get_courses(force_refresh=True)
             if fresh_courses:
                 response_text = localize(
                     phone,
@@ -1320,7 +1483,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     if user_state[phone] == "main_menu":
         if user_msg in ["1", "browse"]:
             user_state[phone] = "browse_courses"
-            courses = get_available_courses(force_refresh=False)
+            courses = await get_courses(force_refresh=False)
             course_ids = list(courses.keys())
 
             if not courses:
@@ -1346,7 +1509,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 token = user_moodle_data[phone]['token']
                 userid = user_moodle_data[phone]['userid']
                 
-                enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
                 
                 if not enrolled_courses:
                     response_text = localize(
@@ -1405,7 +1568,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 token = user_moodle_data[phone]['token']
                 userid = user_moodle_data[phone]['userid']
                 
-                enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
                 
                 if not enrolled_courses:
                     response_text = (
@@ -1654,6 +1817,19 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             clear_session_language(phone)
             return twiml_message(goodbye_text(phone))
 
+        if WHATSAPP_ASYNC_QA and _twilio_ready():
+            payload = ChatRequest(
+                question=raw_msg,
+                context_prompt="Respond in Luganda." if get_session_language(phone) == "lg" else None,
+            )
+            await OUTBOUND_QUEUE.put({"type": "qa", "phone": phone, "payload": payload})
+            response_text = localize(
+                phone,
+                "✅ Got it! I'm working on your answer and will reply shortly.",
+                "✅ Nkimanyi! Nkolela ku kibuuzo kyo era ndiddamu mangu."
+            )
+            return twiml_message(response_text)
+
         try:
             # Get course context if available
             course_context = ""
@@ -1703,20 +1879,20 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
                 token = user_moodle_data[phone]['token']
                 userid = user_moodle_data[phone]['userid']
-                enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
                 if user_msg.isdigit() and 1 <= int(user_msg) <= len(enrolled_courses):
                     selected_course = enrolled_courses[int(user_msg)-1]
                     course_id = selected_course['id']
                     
                     # Get course details and resources
-                    all_courses = get_available_courses()
+                    all_courses = await get_courses(force_refresh=False)
                     course_data = all_courses.get(str(course_id), {})
                     
                     if course_data:
                         # Get fresh resources with user's token
                         token = user_moodle_data[phone]['token']
-                        contents = get_course_contents_moodle(token, int(course_id))
-                        resources = extract_moodle_resources(contents, token)
+                        contents = await get_course_contents_moodle_async(token, int(course_id))
+                        resources = await run_blocking(extract_moodle_resources, contents, token)
                         
                         user_state[phone] = f"enrolled_{course_id}"
                         
@@ -1771,7 +1947,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     course_id = selected_course['id']
                     
                     # Get course details with quizzes
-                    all_courses = get_available_courses()
+                    all_courses = await get_courses(force_refresh=False)
                     course_data = all_courses.get(str(course_id), {})
                     
                     if course_data and course_data.get('quizzes') and len(course_data['quizzes']) > 0:
@@ -1814,7 +1990,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             
         else:
             # Get fresh courses list
-            all_courses = get_available_courses(force_refresh=False)
+            all_courses = await get_courses(force_refresh=False)
             
             if not all_courses:
                 response_text = "No courses available at the moment. Please try again later."
@@ -1853,7 +2029,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     userid = user_moodle_data[phone]['userid']
                     
                     try:
-                        enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                        enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
                         user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
                         
                         # Check if user is enrolled in this course
@@ -1864,8 +2040,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                             user_state[phone] = f"enrolled_{selected_course_id}"
                             
                             # Get course contents with user's token
-                            contents = get_course_contents_moodle(token, int(selected_course_id))
-                            resources = extract_moodle_resources(contents, token)
+                            contents = await get_course_contents_moodle_async(token, int(selected_course_id))
+                            resources = await run_blocking(extract_moodle_resources, contents, token)
                             
                             # Show dynamic overview
                             overview = create_course_overview(
@@ -1880,8 +2056,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                             user_state[phone] = f"browsing_{selected_course_id}"
                             
                             # Get course contents preview (without enrollment)
-                            contents = get_course_contents_moodle(token, int(selected_course_id))
-                            resources = extract_moodle_resources(contents, token)
+                            contents = await get_course_contents_moodle_async(token, int(selected_course_id))
+                            resources = await run_blocking(extract_moodle_resources, contents, token)
                             
                             # Count resources for preview
                             total_files = sum(len(resources.get(cat, [])) for cat in resources.keys())
@@ -1920,7 +2096,9 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 return twiml_message(response_text)
 
     # ====== ENROLLED COURSE ACTIONS ======
-    for course_id, course_data in get_available_courses().items():
+    courses = await get_courses(force_refresh=False)
+    print(courses)
+    for course_id, course_data in courses.items():
         if user_state[phone] == f"enrolled_{course_id}":
             # Check if user is logged in
             if phone not in user_moodle_data or 'token' not in user_moodle_data[phone]:
@@ -1931,8 +2109,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             token = user_moodle_data[phone]['token']
             
             # Get ALL resources using the dynamic extractor
-            contents = get_course_contents_moodle(token, int(course_id))
-            resources = extract_moodle_resources(contents, token)
+            contents = await get_course_contents_moodle_async(token, int(course_id))
+            resources = await run_blocking(extract_moodle_resources, contents, token)
             
             # ====== HANDLE NAVIGATION FIRST ======
             if user_msg == "9":
@@ -2049,13 +2227,14 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 return twiml_message(overview)
 
         # ====== MOODLE VIDEOS HANDLER ======
-    for course_id, course_data in get_available_courses().items():
+    courses = await get_courses(force_refresh=False)
+    for course_id, course_data in courses.items():
         if user_state[phone] == f"moodle_videos_{course_id}":
             if user_msg == "1":
                 # Get direct links (view in browser)
                 token = user_moodle_data[phone]['token']
-                contents = get_course_contents_moodle(token, int(course_id))
-                resources = extract_moodle_resources(contents, token)
+                contents = await get_course_contents_moodle_async(token, int(course_id))
+                resources = await run_blocking(extract_moodle_resources, contents, token)
                 videos = resources.get('videos', [])
                 course_name = course_data["name"]
                 
@@ -2064,12 +2243,11 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 else:
                     raw_xml = create_video_links_response(videos, course_name, phone=phone)
                     return Response(content=raw_xml, media_type="application/xml")
-                    
             elif user_msg == "2":
                 # Download videos to WhatsApp
                 token = user_moodle_data[phone]['token']
-                contents = get_course_contents_moodle(token, int(course_id))
-                resources = extract_moodle_resources(contents, token)
+                contents = await get_course_contents_moodle_async(token, int(course_id))
+                resources = await run_blocking(extract_moodle_resources, contents, token)
                 video_urls = resources.get('videos', [])
                 course_name = course_data["name"]
                 
@@ -2077,10 +2255,59 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     response_text = localize(phone, "No videos available for this course.", "Tewali vidiyo ku ssomo lino.")
                     return twiml_message(response_text)
                 
-                # Show downloading message
-                downloading_msg = f"⏳ Downloading {len(video_urls)} video(s) to WhatsApp...\n\nThis may take a moment."
-                raw_xml = create_smart_video_response(video_urls, course_name, course_id, token, base_url)
-                return Response(content=raw_xml, media_type="application/xml")
+                # Send immediate acknowledgment
+                ack_text = localize(
+                    phone,
+                    f"🎥 Downloading {len(video_urls)} video(s) for {course_name}. I'll send them shortly...",
+                    f"🎥 Nkka vidiyo {len(video_urls)} ez'essomo {course_name}. Nja kuzisindika mangu..."
+                )
+                
+                # Process videos asynchronously
+                async def process_and_send_videos():
+                    for video in video_urls:
+                        video_title = video.get('title', 'Video')
+                        video_url = video.get('url', '')
+                        
+                        if video_url:
+                            try:
+                                # Download video
+                                local_path = await run_blocking(
+                                    download_and_store_video, 
+                                    video_url, 
+                                    course_id, 
+                                    video_title, 
+                                    token
+                                )
+                                
+                                if local_path and base_url:
+                                    filename = os.path.basename(local_path)
+                                    server_url = f"{base_url}/webhook/serve-video/{quote(filename)}"
+                                    
+                                    # Send as separate media message
+                                    await _send_whatsapp_media(phone, f"🎥 {video_title}", server_url)
+                                    
+                            except Exception as e:
+                                print(f"Error with {video_title}: {e}")
+                                await _send_whatsapp_message(
+                                    phone, 
+                                    f"⚠️ Could not download: {video_title}"
+                                )
+                    
+                    # Send completion message
+                    await _send_whatsapp_message(
+                        phone,
+                        localize(
+                            phone,
+                            "✅ All videos sent! Reply 0 for main menu or 9 to go back.",
+                            "✅ Vidiyo zonna zisindikiddwa! Ddamu ne 0 okudda ku main menu oba 9 okuddayo."
+                        )
+                    )
+                
+                # Start background task
+                asyncio.create_task(process_and_send_videos())
+                
+                # Return immediate acknowledgment
+                return twiml_message(ack_text)
                 
             elif user_msg == "9":
                 user_state[phone] = f"enrolled_{course_id}"
@@ -2101,7 +2328,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             return twiml_message(response_text)
     
     # ====== BROWSING SPECIFIC COURSE HANDLER ======
-    for course_id, course_data in get_available_courses().items():
+    for course_id, course_data in courses.items():
         if user_state[phone] == f"browsing_{course_id}":
             base_url = BASE_URL
                 
@@ -2115,7 +2342,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     # FIRST: Check if already enrolled (to avoid duplicate enrollment)
                     already_enrolled = False
                     try:
-                        enrolled_courses = get_user_enrolled_courses_moodle(token, userid)
+                        enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
                         for course in enrolled_courses:
                             if str(course['id']) == str(course_id):
                                 already_enrolled = True
@@ -2129,8 +2356,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                         
                         # Get fresh resources with user's token
                         token = user_moodle_data[phone]['token']
-                        contents = get_course_contents_moodle(token, int(course_id))
-                        resources = extract_moodle_resources(contents, token)
+                        contents = await get_course_contents_moodle_async(token, int(course_id))
+                        resources = await run_blocking(extract_moodle_resources, contents, token)
                         
                         # FIXED: Correct the print statements
                         print("\n" + "="*50)
@@ -2153,17 +2380,17 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                         return twiml_message(overview)
                     else:
                         # Try to enroll
-                        success = enroll_user_in_course(token, userid, int(course_id))
+                        success = await enroll_user_in_course_async(token, userid, int(course_id))
                         
                         if success:
-                            time.sleep(2)  # Give Moodle time to process
-                            if is_enrolled_live(phone, course_id):
+                            await asyncio.sleep(2)  # Give Moodle time to process
+                            if await is_enrolled_live(phone, course_id):
                                 user_state[phone] = f"enrolled_{course_id}"
                             else:
                                 user_state[phone] = "browse_courses"
                             # Verify enrollment by fetching updated course list
                             try:
-                                updated_courses = get_user_enrolled_courses_moodle(token, userid)
+                                updated_courses = await get_user_enrolled_courses_moodle_async(token, userid)
                                 user_moodle_data[phone]['enrolled_courses'] = updated_courses
                                 
                                 # Verify the course is in the list
@@ -2179,8 +2406,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                         
                                     # Get fresh resources with user's token
                                     token = user_moodle_data[phone]['token']
-                                    contents = get_course_contents_moodle(token, int(course_id))
-                                    resources = extract_moodle_resources(contents, token)
+                                    contents = await get_course_contents_moodle_async(token, int(course_id))
+                                    resources = await run_blocking(extract_moodle_resources, contents, token)
                                     
                                     # FIXED: Correct the print statements
                                     print("\n" + "="*50)
@@ -2328,8 +2555,16 @@ async def whatsapp_info():
 @router.on_event("startup")
 async def startup_event():
     """Pre-load courses on startup for instant response"""
-    get_available_courses()
+    await get_available_courses_async()
     start_preload_worker()
+    if WHATSAPP_ASYNC_QA and _twilio_ready():
+        for _ in range(max(1, WHATSAPP_OUTBOUND_WORKERS)):
+            asyncio.create_task(_outbound_worker())
+
+
+@router.on_event("shutdown")
+async def shutdown_event():
+    await close_async_client()
 
 # Keep backward compatibility - export app if needed for direct usage
 app = FastAPI(title="WhatsApp Chat")

@@ -5,7 +5,8 @@ from typing import Generator, Iterable, List, Optional, Tuple
 
 from fastapi.encoders import jsonable_encoder
 
-from app.config import Settings, get_openai_client, get_settings
+from app.config import Settings, get_openai_client, get_openai_async_client, get_settings
+import asyncio
 from app.schemas import ChatRequest, ChatResponse, Citation
 from app.services.embeddings import embed_query
 from app.services.vectorstore import get_collection, query_collection
@@ -245,6 +246,41 @@ def answer_question(payload: ChatRequest) -> ChatResponse:
     context = _format_context(raw_results)
     messages = _build_prompt(payload.question, context, payload.context_prompt)
     chat_completion = client.chat.completions.create(
+        model=settings.chat_model,
+        messages=messages,
+        temperature=0.2,
+    )
+
+    answer_text = _coerce_text(chat_completion.choices[0].message.content).strip()
+
+    return ChatResponse(
+        answer=answer_text,
+        citations=_to_citations(raw_results),
+    )
+
+
+async def answer_question_async(payload: ChatRequest) -> ChatResponse:
+    settings: Settings = get_settings()
+    client = get_openai_async_client(settings)
+    collection = get_collection()
+
+    try:
+        raw_results = await asyncio.to_thread(_fetch_retrieval_results, collection, payload)
+    except Exception as exc:  # noqa: BLE001
+        return ChatResponse(
+            answer=_retrieval_error_message(exc),
+            citations=[],
+        )
+
+    if not raw_results:
+        return ChatResponse(
+            answer="I could not find the answer in the uploaded documents.",
+            citations=[],
+        )
+
+    context = _format_context(raw_results)
+    messages = _build_prompt(payload.question, context, payload.context_prompt)
+    chat_completion = await client.chat.completions.create(
         model=settings.chat_model,
         messages=messages,
         temperature=0.2,

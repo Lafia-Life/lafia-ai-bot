@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from pydantic import BaseModel, Field
 
 
@@ -98,3 +98,13 @@ def get_openai_client(settings: Optional[Settings] = None) -> OpenAI:
     if current.openai_base_url:
         kwargs["base_url"] = current.openai_base_url.rstrip("/")
     return OpenAI(**kwargs)
+
+
+def get_openai_async_client(settings: Optional[Settings] = None) -> AsyncOpenAI:
+    current = settings or get_settings()
+    kwargs = {}
+    if current.openai_api_key:
+        kwargs["api_key"] = current.openai_api_key
+    if current.openai_base_url:
+        kwargs["base_url"] = current.openai_base_url.rstrip("/")
+    return AsyncOpenAI(**kwargs)
