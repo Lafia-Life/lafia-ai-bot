@@ -14,6 +14,9 @@ load_dotenv()
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+_last_course_sync_error = None
+
+
 cache_lock = threading.Lock()
 courses_cache = {}   
 CACHE_DURATION = 300 

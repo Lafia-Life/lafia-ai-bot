@@ -57,6 +57,10 @@ from app.services.moodle_service import (
 )
 from urllib.parse import quote, unquote, urlparse
 import urllib3
+import html
+from twilio.rest import Client
+
+
 load_dotenv()
 
 # Create router instead of app
@@ -82,6 +86,7 @@ user_moodle_data = {}
 # Disable SSL warnings for Moodle
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 BASE_URL = os.getenv("BASE_URL")
+twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
 BLOCKING_MAX_WORKERS = int(os.getenv("WHATSAPP_BLOCKING_MAX_WORKERS", "100"))
 BLOCKING_EXECUTOR = ThreadPoolExecutor(max_workers=BLOCKING_MAX_WORKERS)
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
@@ -592,9 +597,7 @@ def serve_video(filename: str):
     )
 
 def create_smart_video_response(video_urls, course_name, course_id, token, base_url: str = BASE_URL,phone: str | None = None):
-    # "https://elearning.cadh.africa"
     """Download videos and serve them DIRECTLY in WhatsApp messages"""
-
     if not video_urls:
         if phone:
             response_text = localize(
@@ -868,6 +871,7 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
 
             print("\nDownloading...")
             get_response = requests.get(download_url, headers=headers, stream=True, timeout=60, verify=False)
+            print("download response",get_response)
             if get_response.status_code != 200:
                 print(f"Video download failed (GET {get_response.status_code})")
                 continue
@@ -1292,7 +1296,7 @@ def main_menu_text(phone: str, first_time: bool = False):
         return localize(
             phone,
             "👋 Hello! Welcome to MoH E-Learning Assistant!\n\n"
-            "📚 *Available Actions:*\n"
+            "📚 *Select Option to continue:*\n"
             "1️⃣ Browse Courses\n"
             "2️⃣ My Enrolled Courses\n"
             "3️⃣ Take a Quiz\n"
@@ -1316,7 +1320,7 @@ def main_menu_text(phone: str, first_time: bool = False):
     return localize(
         phone,
         "👋 Welcome back to MoH E-Learning Assistant!\n\n"
-        "📚 *Available Actions:*\n"
+        "📚 *Select Option to continue:*\n"
         "1️⃣ Browse Courses\n"
         "2️⃣ My Enrolled Courses\n"
         "3️⃣ Take a Quiz\n"
@@ -1385,6 +1389,7 @@ def create_quiz_response(course_data, base_url: str = BASE_URL):
     escaped_text = escape_xml(full_message)
     raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
     return raw_xml
+
 
 @router.post("/")  
 async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default="")):
@@ -1643,37 +1648,36 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             )
             
         elif user_msg in ["6", "ask", "question"]:
-            user_state[phone] = "question_mode"
-            
-            # Show available course materials for context
-            courses = await get_courses(force_refresh=True)
+            # Fetch courses (cached first)
+            courses = user_moodle_data.get(phone, {}).get('available_courses')
             if not courses:
-                response_text = question_mode_empty_text(phone)
-            else:
-                # Build list of available materials
-                materials_list = localize(
-                    phone,
-                    "📚 *Available Course Materials:*\n\n",
-                    "📚 *Ebikozesebwa by'Amasomo Ebiriwo:*\n\n"
-                )
-                
-                for course_id, course_data in courses.items():
-                    materials_list += f"🏷️ *{course_data['name']}*\n"
-                    
-                    materials_list += "\n"
-                
-                materials_list += localize(
-                    phone,
-                    "💡 *Ask questions about:*\n"
-                    "• Specific topics from these materials\n"
-                    "0️⃣ Main Menu • #️⃣ Exit",
-                    "💡 *Osobola okubuuza ku:*\n"
-                    "• Emitwe egy'enjawulo mu bikozesebwa bino\n"
-                    "0️⃣ Main Menu • #️⃣ Mala"
-                )
-                
-                response_text = materials_list
+                courses = get_available_courses()
 
+            # Store courses for context
+            if phone not in user_moodle_data:
+                user_moodle_data[phone] = {}
+            user_moodle_data[phone]['available_courses'] = courses
+
+            # Move directly to question mode
+            user_state[phone] = "question_mode"
+
+            # Format course list (for display only)
+            if courses:
+                course_list = "\n".join([f"• {c['name']}" for c in courses.values()])
+                course_text = f"📚 *Available Courses:*\n{course_list}\n\n"
+            else:
+                course_text = ""
+
+            response_text = (
+                f"{course_text}"
+                "💬 *Ask Your Question*\n\n"
+                "You can ask about any of the courses above.\n\n"
+                "Just type your question below:\n\n"
+                "0️⃣ Main Menu • #️⃣ Exit"
+            )
+
+            return twiml_message(response_text)
+        
         elif user_msg in ["7", "language", "lang", "olulimi"]:
             user_state[phone] = "language_selection_menu"
             response_text = language_selection_text(change_mode=True)
@@ -1795,9 +1799,19 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
 
     # ====== QUESTION MODE HANDLER ======
     if user_state[phone] == "question_mode":
+    
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
+            # Clear the selected course
+            if phone in user_moodle_data:
+                user_moodle_data[phone].pop('selected_question_course', None)
             return twiml_message(main_menu_text(phone))
+        
+        if user_msg == "9" and user_state[phone] == "question_mode_with_course":
+            # Go back to course selection
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text(phone))
+        
         if user_msg in ["#", "exit"]:
             user_state.pop(phone, None)
             clear_session_language(phone)
@@ -1817,29 +1831,43 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             return twiml_message(response_text)
 
         try:
-            chat_response = await answer_question_async(
+            # Get course context if available
+            course_context = ""
+            selected_course = None
+            
+            if user_state[phone] == "question_mode_with_course" and phone in user_moodle_data:
+                selected_course = user_moodle_data[phone].get('selected_question_course', {})
+                if selected_course:
+                    course_context = f" (regarding the course: {selected_course['name']})"
+            
+            # Call the AI knowledge assistant
+            chat_response = answer_question(
                 ChatRequest(
                     question=raw_msg,
-                    context_prompt="Respond in Luganda." if get_session_language(phone) == "lg" else None,
-                ),
-            )
-            response_text = localize(
-                phone,
-                f"🤖 {chat_response.answer}\n\nAsk another question, or reply 0 for main menu.",
-                f"🤖 {chat_response.answer}\n\nBuuza ekibuuzo ekirala, oba ddamu ne 0 okudda ku main menu."
-            )
+                    context_prompt=f"Answer based on the course materials. User is asking about: {selected_course['name'] if selected_course else 'general topics'}" if course_context else None,
+                )
+            )            
+            # Format the response
+            response_text = f"🤖 {chat_response.answer}\n\n"
+            if selected_course:
+                response_text += f"📚 *Course:* {selected_course['name']}\n\n"
+            response_text += "Ask another question, or reply 0 for main menu (or 9 to change course)."
+
         except Exception as e:
             print(f"Q&A error: {e}")
-            response_text = localize(
-                phone,
-                "⚠️ I could not process your question right now.\n\nPlease try again, or reply 0 for main menu.",
-                "⚠️ Sisobodde kukola ku kibuuzo kyo mu kaseera kano.\n\nGezaako nate, oba ddamu ne 0 okudda ku main menu."
-            )
-        return twiml_message(response_text)
+            response_text = "⚠️ I could not process your question right now.\n\nPlease try again, or reply 0 for main menu."
+        
+        # USE html.escape to ensure the XML is 100% valid
+        safe_text = html.escape(response_text)
+        raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{safe_text}</Message></Response>'
+        return Response(content=raw_xml, media_type="application/xml")
 
     # ====== MY ENROLLED COURSES HANDLER ======
     if user_state[phone] == "my_courses":
         if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            response_text = main_menu_text(phone)
+        elif user_msg == "9":
             user_state[phone] = "main_menu"
             response_text = main_menu_text(phone)
         elif user_msg in ["#", "exit"]:
@@ -1897,7 +1925,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             user_state[phone] = "main_menu"
             response_text = (
                 "👋 Welcome back to MoH E-Learning Assistant!\n\n"
-                "📚 *Available Actions:*\n"
+                "📚 *Select Option to continue:*\n"
                 "1️⃣ Browse Courses\n"
                 "2️⃣ My Enrolled Courses\n"
                 "3️⃣ Take a Quiz\n"
@@ -1952,7 +1980,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     if user_state[phone] == "browse_courses":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
-            response_text = main_menu_text()
+            response_text = main_menu_text(phone)
             return twiml_message(response_text)
             
         elif user_msg in ["#", "exit"]:
@@ -1977,10 +2005,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 if 1 <= selected_num <= len(course_keys):
                     selected_course_id = course_keys[selected_num - 1]
                     selected_course = all_courses[selected_course_id]
-                    
-                    # Debug: Print selected course
-                    print(f"\n🔍 Selected course: {selected_course['name']} (ID: {selected_course_id})")
-                    
+                                        
                     # CHECK IF USER IS LOGGED IN
                     if phone not in user_moodle_data or 'token' not in user_moodle_data.get(phone, {}):
                         # Store original intent for after login
@@ -2024,8 +2049,6 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                                 selected_course['name'], 
                                 len(selected_course.get('quizzes', []))
                             )
-                            
-                            print(f"\n✅ User enrolled in {selected_course['name']}")
                             return twiml_message(overview)
                             
                         else:
@@ -2073,6 +2096,8 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 return twiml_message(response_text)
 
     # ====== ENROLLED COURSE ACTIONS ======
+    courses = await get_courses(force_refresh=False)
+    print(courses)
     for course_id, course_data in courses.items():
         if user_state[phone] == f"enrolled_{course_id}":
             # Check if user is logged in
@@ -2087,6 +2112,45 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             contents = await get_course_contents_moodle_async(token, int(course_id))
             resources = await run_blocking(extract_moodle_resources, contents, token)
             
+            # ====== HANDLE NAVIGATION FIRST ======
+            if user_msg == "9":
+                user_state[phone] = "browse_courses"
+                
+                # Get and display the course list
+                all_courses = get_available_courses(force_refresh=False)
+                
+                if not all_courses:
+                    response_text = browse_courses_empty_text(phone)
+                else:
+                    course_list = "\n".join([f"{i+1}. {course['name']}" for i, course in enumerate(all_courses.values())])
+                    response_text = localize(
+                        phone,
+                        "📚 *Browse All Courses*\n\n"
+                        f"{course_list}\n\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        "💡 Select a course number to view details\n\n"
+                        "0️⃣ Main Menu • #️⃣ Exit",
+                        "📚 *Laba Amasomo Gonna*\n\n"
+                        f"{course_list}\n\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        "💡 Londa namba y'essomo okulaba ebisingawo\n\n"
+                        "0️⃣ Main Menu • #️⃣ Mala"
+                    )
+                
+                return twiml_message(response_text)
+            
+            if user_msg in ["0", "menu", "main menu"]:
+                user_state[phone] = "main_menu"
+                response_text = main_menu_text(phone)
+                return twiml_message(response_text)
+            
+            if user_msg in ["#", "exit"]:
+                response_text = goodbye_text(phone)
+                user_state.pop(phone, None)
+                clear_session_language(phone)
+                return twiml_message(response_text)
+            
+            # ====== THEN HANDLE CATEGORY SELECTION ======
             # Define all possible categories in desired display order
             all_categories = [
                 ('documents', '📄'),
@@ -2107,6 +2171,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             
             # Get quiz count
             quiz_count = len(course_data.get('quizzes', []))
+            
             # Check if user selected a category (based on menu position)
             if user_msg.isdigit():
                 selected_index = int(user_msg) - 1
@@ -2146,29 +2211,16 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 
                 # Handle invalid selections
                 else:
-                    response_text = "Invalid option. Please select a valid number."
+                    response_text = localize(
+                        phone,
+                        "Invalid option. Please select a valid number.\n\n"
+                        "0️⃣ Main Menu • 9️⃣ Back to My Courses • #️⃣ Exit",
+                        "Olonze namba esinga. Londa namba esinga.\n\n"
+                        "0️⃣ Main Menu • 9️⃣ Ddayo ku Masomo Gange • #️⃣ Mala"
+                    )
                     return twiml_message(response_text)
             
-            # Handle navigation
-            if user_msg == "9":
-                if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
-                    user_state[phone] = "my_courses"
-                    response_text = localize(phone, "↩️ Returning to your enrolled courses...", "↩️ Okudda ku masomo go ge nnegattako...")
-                else:
-                    user_state[phone] = "browse_courses"
-                    response_text = "↩️ Returning to browse courses..."
-                return twiml_message(response_text)
-                
-            elif user_msg in ["0", "menu"]:
-                user_state[phone] = "main_menu"
-                response_text = main_menu_text()
-                return twiml_message(response_text)
-                
-            elif user_msg == "#":
-                response_text = goodbye_text(phone)
-                user_state.pop(phone, None)
-                return twiml_message(response_text)
-                
+            # If user input is not a digit, show the overview menu
             else:
                 # Show dynamic overview menu
                 overview = create_course_overview(resources, course_data['name'], quiz_count)
@@ -2191,7 +2243,6 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 else:
                     raw_xml = create_video_links_response(videos, course_name, phone=phone)
                     return Response(content=raw_xml, media_type="application/xml")
-                    
             elif user_msg == "2":
                 # Download videos to WhatsApp
                 token = user_moodle_data[phone]['token']
@@ -2204,33 +2255,59 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     response_text = localize(phone, "No videos available for this course.", "Tewali vidiyo ku ssomo lino.")
                     return twiml_message(response_text)
                 
-                if WHATSAPP_ASYNC_VIDEO and _twilio_ready():
-                    await OUTBOUND_QUEUE.put({
-                        "type": "video_download",
-                        "phone": phone,
-                        "course_id": course_id,
-                        "course_name": course_name,
-                        "token": token,
-                        "video_urls": video_urls,
-                        "base_url": base_url,
-                    })
-                    response_text = localize(
-                        phone,
-                        f"✅ Got it! I’ll send {len(video_urls)} video(s) shortly.",
-                        f"✅ Kale! Nja kusindika vidiyo {len(video_urls)} mangu."
-                    )
-                    return twiml_message(response_text)
-
-                # Sync fallback (Twilio webhook response)
-                raw_xml = await run_blocking(
-                    create_smart_video_response,
-                    video_urls,
-                    course_name,
-                    course_id,
-                    token,
-                    base_url,
+                # Send immediate acknowledgment
+                ack_text = localize(
+                    phone,
+                    f"🎥 Downloading {len(video_urls)} video(s) for {course_name}. I'll send them shortly...",
+                    f"🎥 Nkka vidiyo {len(video_urls)} ez'essomo {course_name}. Nja kuzisindika mangu..."
                 )
-                return Response(content=raw_xml, media_type="application/xml")
+                
+                # Process videos asynchronously
+                async def process_and_send_videos():
+                    for video in video_urls:
+                        video_title = video.get('title', 'Video')
+                        video_url = video.get('url', '')
+                        
+                        if video_url:
+                            try:
+                                # Download video
+                                local_path = await run_blocking(
+                                    download_and_store_video, 
+                                    video_url, 
+                                    course_id, 
+                                    video_title, 
+                                    token
+                                )
+                                
+                                if local_path and base_url:
+                                    filename = os.path.basename(local_path)
+                                    server_url = f"{base_url}/webhook/serve-video/{quote(filename)}"
+                                    
+                                    # Send as separate media message
+                                    await _send_whatsapp_media(phone, f"🎥 {video_title}", server_url)
+                                    
+                            except Exception as e:
+                                print(f"Error with {video_title}: {e}")
+                                await _send_whatsapp_message(
+                                    phone, 
+                                    f"⚠️ Could not download: {video_title}"
+                                )
+                    
+                    # Send completion message
+                    await _send_whatsapp_message(
+                        phone,
+                        localize(
+                            phone,
+                            "✅ All videos sent! Reply 0 for main menu or 9 to go back.",
+                            "✅ Vidiyo zonna zisindikiddwa! Ddamu ne 0 okudda ku main menu oba 9 okuddayo."
+                        )
+                    )
+                
+                # Start background task
+                asyncio.create_task(process_and_send_videos())
+                
+                # Return immediate acknowledgment
+                return twiml_message(ack_text)
                 
             elif user_msg == "9":
                 user_state[phone] = f"enrolled_{course_id}"
