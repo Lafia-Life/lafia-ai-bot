@@ -59,6 +59,9 @@ from urllib.parse import quote, unquote, urlparse
 import urllib3
 import html
 from twilio.rest import Client
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 
 load_dotenv()
@@ -972,6 +975,40 @@ def create_moodle_pdf_response(pdfs, course_name, phone: str | None = None):
 {"".join(messages_xml)}
 </Response>'''
 
+# Email configuration
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USER)
+
+async def _send_email(to_email: str, subject: str, body: str) -> bool:
+    """Send email as fallback when teacher doesn't have WhatsApp"""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        print("⚠️ Email not configured. Set SMTP_USER and SMTP_PASSWORD in .env")
+        return False
+    
+    try:
+        def send_email_sync():
+            msg = MIMEMultipart()
+            msg['From'] = SMTP_FROM_EMAIL
+            msg['To'] = to_email
+            msg['Subject'] = subject
+            msg.attach(MIMEText(body, 'plain'))
+            
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        
+        await run_blocking(send_email_sync)
+        print(f"✅ Email sent to {to_email}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to send email: {e}")
+        return False
+    
 async def handle_moodle_login_flow(phone, raw_msg):
     state = user_state.get(phone)
 
@@ -1237,10 +1274,6 @@ async def handle_moodle_login_flow(phone, raw_msg):
                     
                     response_text = overview
                     return twiml_message(overview)
-                    
-                    escaped_text = escape_xml(response_text)
-                    raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
-                    return Response(content=raw_xml, media_type="application/xml")
 
                 else:
                     response_text = localize(
@@ -1251,6 +1284,63 @@ async def handle_moodle_login_flow(phone, raw_msg):
                     escaped_text = escape_xml(response_text)
                     raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
                     return Response(content=raw_xml, media_type="application/xml")
+                
+            # Add this to the intent handling section
+            elif intent.get('action') == 'ask_trainer':
+                # User wanted to ask a trainer after login
+                user_moodle_data[phone].pop('original_intent', None)
+                
+                # Get user's ENROLLED courses
+                token = auth_result['token']
+                userid = auth_result['userid']
+                enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
+                
+                if not enrolled_courses:
+                    response_text = localize(
+                        phone,
+                        "📚 *No Enrolled Courses*\n\n"
+                        "You are not enrolled in any courses yet.\n\n"
+                        "Please enroll in courses first (Option 1 from main menu).\n\n"
+                        "0️⃣ Main Menu",
+                        "📚 *Tewali Masomo Gewegattako*\n\n"
+                        "Tonnawegatta ku masomo gonna.\n\n"
+                        "Sooka weegatte ku masomo (Option 1 okuva ku main menu).\n\n"
+                        "0️⃣ Main Menu"
+                    )
+                    user_state[phone] = "main_menu"
+                else:
+                    # Store enrolled courses and go to course selection
+                    user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
+                    user_state[phone] = "trainer_course_selection"
+                    
+                    course_list = "\n".join([f"{i+1}. {course['name']}" for i, course in enumerate(enrolled_courses)])
+                    response_text = localize(
+                        phone,
+                        f"👨‍🏫 *Ask a Trainer*\n\n"
+                        f"📋 *Instructions:*\n"
+                        f"• Select a course you're enrolled in from the list below\n"
+                        f"• Type your question about that course\n"
+                        f"• Your question will be sent directly to the course teacher(s)\n"
+                        f"• Teachers will reply to you via WhatsApp\n\n"
+                        f"📚 *Your Enrolled Courses:*\n"
+                        f"{course_list}\n\n"
+                        f"Enter the course number:\n\n"
+                        f"0️⃣ Main Menu • #️⃣ Exit",
+                        f"👨‍🏫 *Buuza Omusomesa*\n\n"
+                        f"📋 *Ebigendererwa:*\n"
+                        f"• Londa essomo lino okuva mu lukalala wammanga\n"
+                        f"• Wandiika ekibuuzo kyo ku essomo eryo\n"
+                        f"• Ekibuuzo kyo kijja kusindikibwa eri omusomesa w'essomo\n"
+                        f"• Abasomesa bajja kukuddamu okuyita mu WhatsApp\n\n"
+                        f"📚 *Amasomo Go Gewegattako:*\n"
+                        f"{course_list}\n\n"
+                        f"Wandiika namba y'essomo:\n\n"
+                        f"0️⃣ Main Menu • #️⃣ Mala"
+                    )
+                
+                escaped_text = escape_xml(response_text)
+                raw_xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_text}</Message></Response>'
+                return Response(content=raw_xml, media_type="application/xml")
         
         # If no intent or intent not handled, go to main menu
         user_state[phone] = "main_menu"
@@ -1626,26 +1716,76 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             )
             
         elif user_msg in ["5", "help", "trainer"]:
-            user_state[phone] = "ask_trainer"
+            # Check if user is logged into Moodle
+            if phone not in user_moodle_data or 'token' not in user_moodle_data.get(phone, {}):
+                # Store intent for after login
+                if phone not in user_moodle_data:
+                    user_moodle_data[phone] = {}
+                user_moodle_data[phone]['original_intent'] = {
+                    'action': 'ask_trainer'
+                }
+                user_state[phone] = "moodle_username"
+                response_text = localize(
+                    phone,
+                    "🔐 *Login Required*\n\n"
+                    "To ask a trainer, you need to login to Moodle first.\n\n"
+                    "Please enter your Moodle username:",
+                    "🔐 *Okweyingiza Kwetaagisa*\n\n"
+                    "Okubuuza omusomesa, sooka weyingize ku Moodle.\n\n"
+                    "Wandiika erinnya lyo ery'okweyingiza ku Moodle:"
+                )
+                return twiml_message(response_text)
+            
+            # User is logged in - get their ENROLLED courses
+            token = user_moodle_data[phone]['token']
+            userid = user_moodle_data[phone]['userid']
+            enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
+            
+            if not enrolled_courses:
+                response_text = localize(
+                    phone,
+                    "📚 *No Enrolled Courses*\n\n"
+                    "You are not enrolled in any courses yet.\n\n"
+                    "Please enroll in courses first (Option 1 from main menu).\n\n"
+                    "0️⃣ Main Menu",
+                    "📚 *Tewali Masomo Gewegattako*\n\n"
+                    "Tonnawegatta ku masomo gonna.\n\n"
+                    "Sooka weegatte ku masomo (Option 1 okuva ku main menu).\n\n"
+                    "0️⃣ Main Menu"
+                )
+                user_state[phone] = "main_menu"
+                return twiml_message(response_text)
+            
+            # Store enrolled courses and go to course selection
+            user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
+            user_state[phone] = "trainer_course_selection"
+            
+            # Build course list
+            course_list = "\n".join([f"{i+1}. {course['name']}" for i, course in enumerate(enrolled_courses)])
             response_text = localize(
                 phone,
-                "👨‍🏫 *Trainer Support*\n\n"
-                "Need help with a specific topic? Our trainers are here to assist you!\n\n"
-                "Please describe what you need help with:\n"
-                "• Specific topic confusion\n"
-                "• Technical issues\n"
-                "• Course content questions\n"
-                "• Other learning support\n\n"
-                "0️⃣ Main Menu • #️⃣ Exit",
-                "👨‍🏫 *Obuyambi bw'Omusomesa*\n\n"
-                "Weetaaga obuyambi ku nsonga emu? Abasomesa baffe bali wano okukuyamba!\n\n"
-                "Nnyonnyola ky'oyagala okufunamu obuyambi:\n"
-                "• Ekitundu ky'otategedde bulungi\n"
-                "• Ebizibu eby'ekikugu\n"
-                "• Ebibuuzo ku birimu by'essomo\n"
-                "• Obuyambi obulala ku kuyiga\n\n"
-                "0️⃣ Main Menu • #️⃣ Mala"
+                f"👨‍🏫 *Ask a Trainer*\n\n"
+                f"📋 *Instructions:*\n"
+                f"• Select a course you're enrolled in from the list below\n"
+                f"• Type your question about that course\n"
+                f"• Your question will be sent to the course teacher(s)\n"
+                f"• Teachers will reply to you via WhatsApp or Email\n\n"
+                f"📚 *Your Enrolled Courses:*\n"
+                f"{course_list}\n\n"
+                f"Enter the course number:\n\n"
+                f"0️⃣ Main Menu • #️⃣ Exit",
+                f"👨‍🏫 *Buuza Omusomesa*\n\n"
+                f"📋 *Ebigendererwa:*\n"
+                f"• Londa essomo lino okuva mu lukalala wammanga\n"
+                f"• Wandiika ekibuuzo kyo ku essomo eryo\n"
+                f"• Ekibuuzo kyo kijja kusindikibwa eri omusomesa w'essomo\n"
+                f"• Abasomesa bajja kukuddamu okuyita mu WhatsApp oba Email\n\n"
+                f"📚 *Amasomo Go Gewegattako:*\n"
+                f"{course_list}\n\n"
+                f"Wandiika namba y'essomo:\n\n"
+                f"0️⃣ Main Menu • #️⃣ Mala"
             )
+            return twiml_message(response_text)
             
         elif user_msg in ["6", "ask", "question"]:
             # Fetch courses (cached first)
@@ -1774,28 +1914,406 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             )
         )
 
-    # ====== TRAINER SUPPORT HANDLER ======
-    if user_state[phone] == "ask_trainer":
+
+    # ====== TRAINER COURSE SELECTION HANDLER ======
+    # This handles when user selects a course number from the list
+    if user_state[phone] == "trainer_course_selection":
         if user_msg in ["0", "menu", "main menu"]:
             user_state[phone] = "main_menu"
             return twiml_message(main_menu_text(phone))
+        
         if user_msg in ["#", "exit"]:
             user_state.pop(phone, None)
             clear_session_language(phone)
             return twiml_message(goodbye_text(phone))
-        user_state[phone] = "main_menu"
-        return twiml_message(
-            localize(
+        
+        # User should enter a course number
+        if not user_msg.isdigit():
+            response_text = localize(
                 phone,
-                "✅ Your message has been sent to a trainer.\n\n"
-                "A trainer will follow up with you.\n\n"
-                "Returning to main menu:\n\n",
-                "✅ Obubaka bwo busindikiddwa eri omusomesa.\n\n"
-                "Omusomesa ajja kukuddamu.\n\n"
-                "Okudda ku main menu:\n\n"
+                "Please enter a valid course number from the list.",
+                "Wandiika namba y'essomo esinga okuva ku lukalala."
             )
-            + main_menu_text(phone)
-        )
+            return twiml_message(response_text)
+        
+        selected_index = int(user_msg) - 1
+        enrolled_courses = user_moodle_data.get(phone, {}).get('enrolled_courses', [])
+        
+        if not enrolled_courses:
+            # Try to fetch again
+            token = user_moodle_data[phone]['token']
+            userid = user_moodle_data[phone]['userid']
+            enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
+            user_moodle_data[phone]['enrolled_courses'] = enrolled_courses
+        
+        if 0 <= selected_index < len(enrolled_courses):
+            selected_course = enrolled_courses[selected_index]
+            course_id = selected_course['id']
+            course_name = selected_course['name']
+            
+            # Get teachers for this specific course from Moodle
+            token = user_moodle_data[phone]['token']
+            
+            # Import teacher function from moodle_service
+            from app.services.moodle_service import get_course_teachers_comprehensive_async
+            
+            teachers = await get_course_teachers_comprehensive_async(token, course_id)
+            
+            if not teachers:
+                response_text = localize(
+                    phone,
+                    f"⚠️ *No Teachers Assigned*\n\n"
+                    f"No teachers are currently assigned to '{course_name}'.\n\n"
+                    f"Please contact the administrator.\n\n"
+                    f"0️⃣ Main Menu",
+                    f"⚠️ *Tewali Basomesa Bagabuddwa*\n\n"
+                    f"Tewali musomesa agabudwa ku '{course_name}' kati.\n\n"
+                    f"Tukirira omuddukanya.\n\n"
+                    f"0️⃣ Main Menu"
+                )
+                user_state[phone] = "main_menu"
+                return twiml_message(response_text)
+            
+            # Store selected course and teachers
+            user_moodle_data[phone]['selected_course'] = {
+                'id': course_id,
+                'name': course_name,
+                'teachers': teachers
+            }
+            user_state[phone] = "trainer_question_input"
+            
+            # Show teacher info to the learner
+            teacher_names = ", ".join([t.get('fullname', 'Teacher') for t in teachers[:3]])
+            if len(teachers) > 3:
+                teacher_names += f" and {len(teachers) - 3} others"
+            
+            response_text = localize(
+                phone,
+                f"👨‍🏫 *Ask {course_name} Teacher(s)*\n\n"
+                f"📋 Course: {course_name}\n"
+                f"👨‍🏫 Teachers: {teacher_names}\n\n"
+                f"Please type your question below:\n\n"
+                f"0️⃣ Cancel",
+                f"👨‍🏫 *Buuza Omusomesa wa {course_name}*\n\n"
+                f"📋 Essomo: {course_name}\n"
+                f"👨‍🏫 Abasomesa: {teacher_names}\n\n"
+                f"Wandiika ekibuuzo kyo wansi:\n\n"
+                f"0️⃣ Siba"
+            )
+            return twiml_message(response_text)
+        else:
+            response_text = localize(
+                phone,
+                f"Invalid course number. Please select 1-{len(enrolled_courses)}.",
+                f"Namba y'essomo si ntuufu. Londa 1-{len(enrolled_courses)}."
+            )
+            return twiml_message(response_text)
+
+    # # ====== TRAINER QUESTION INPUT HANDLER ======
+    # # This handles when user types their question after selecting a course
+    # if user_state[phone] == "trainer_question_input":
+    #     if user_msg in ["0", "menu", "main menu"]:
+    #         user_state[phone] = "main_menu"
+    #         if phone in user_moodle_data:
+    #             user_moodle_data[phone].pop('selected_course', None)
+    #         return twiml_message(main_menu_text(phone))
+        
+    #     if user_msg in ["#", "exit"]:
+    #         user_state.pop(phone, None)
+    #         clear_session_language(phone)
+    #         return twiml_message(goodbye_text(phone))
+        
+    #     # Get the selected course and teachers
+    #     selected_data = user_moodle_data.get(phone, {}).get('selected_course')
+        
+    #     if not selected_data:
+    #         user_state[phone] = "main_menu"
+    #         response_text = localize(phone, "Session expired. Please start over.", "Session yazze. Sooka ku ntandikwa.")
+    #         return twiml_message(response_text)
+        
+    #     course_id = selected_data['id']
+    #     course_name = selected_data['name']
+    #     teachers = selected_data['teachers']
+    #     question = raw_msg
+        
+    #     # Get the learner's name
+    #     learner_name = user_moodle_data.get(phone, {}).get('fullname', 'A learner')
+        
+    #     # Generate unique question ID
+    #     question_id = f"Q{int(time.time())}_{phone[-6:]}"
+        
+    #     # Store question for tracking
+    #     if 'pending_questions' not in user_moodle_data:
+    #         user_moodle_data['pending_questions'] = {}
+        
+    #     user_moodle_data['pending_questions'][question_id] = {
+    #         'learner_phone': phone,
+    #         'learner_name': learner_name,
+    #         'course_id': course_id,
+    #         'course_name': course_name,
+    #         'question': question,
+    #         'timestamp': datetime.now().isoformat(),
+    #         'status': 'pending',
+    #         'teachers_notified': []
+    #     }
+        
+    #     # Send question to each teacher assigned to this course
+    #     notified_count = 0
+    #     for teacher in teachers:
+    #         if teacher.get('contact_method') == 'whatsapp' and teacher.get('phone'):
+    #             message = (
+    #                 f"👨‍🏫 *New Question from Student*\n\n"
+    #                 f"📚 Course: {course_name}\n"
+    #                 f"👤 Student: {learner_name}\n"
+    #                 f"📱 Student Phone: {phone}\n"
+    #                 f"❓ Question: {question}\n\n"
+    #                 f"━━━━━━━━━━━━━━━━━━━━\n"
+    #                 f"💡 *To reply to this student:*\n"
+    #                 f"Send: /reply {question_id} [your answer]\n\n"
+    #                 f"Example: /reply {question_id} Thank you for your question. The answer is...\n"
+    #                 f"━━━━━━━━━━━━━━━━━━━━\n"
+    #                 f"✅ The student will receive your reply immediately."
+    #             )
+                
+    #             teacher_whatsapp = teacher['phone']
+    #             if not teacher_whatsapp.startswith('whatsapp:'):
+    #                 teacher_whatsapp = f"whatsapp:{teacher_whatsapp}"
+                
+    #             await _send_whatsapp_message(teacher_whatsapp, message)
+    #             notified_count += 1
+    #             user_moodle_data['pending_questions'][question_id]['teachers_notified'].append({
+    #                 'name': teacher.get('fullname'),
+    #                 'phone': teacher_whatsapp
+    #             })
+    #             print(f"✅ Notified teacher {teacher.get('fullname')} for course {course_name}")
+        
+    #     # Clear selected course and return to main menu
+    #     user_moodle_data[phone].pop('selected_course', None)
+    #     user_state[phone] = "main_menu"
+        
+    #     if notified_count > 0:
+    #         response_text = localize(
+    #             phone,
+    #             f"✅ *Question Sent Successfully!*\n\n"
+    #             f"📚 Course: {course_name}\n"
+    #             f"👨‍🏫 Notified: {notified_count} teacher(s)\n"
+    #             f"❓ Question: {question[:100]}...\n\n"
+    #             f"📋 Reference ID: {question_id}\n\n"
+    #             f"Teachers have been notified and will respond shortly.\n\n"
+    #             f"💡 You will receive their response here on WhatsApp.\n\n"
+    #             f"0️⃣ Main Menu",
+    #             f"✅ *Ekibuuzo Kisindikiddwa!*\n\n"
+    #             f"📚 Essomo: {course_name}\n"
+    #             f"👨‍🏫 Bamanyisiddwa: {notified_count} omusomesa\n"
+    #             f"❓ Ekibuuzo: {question[:100]}...\n\n"
+    #             f"📋 Koodi y'ekibuuzo: {question_id}\n\n"
+    #             f"Abasomesa bamanyisiddwa era bajja kukuddamu mangu.\n\n"
+    #             f"💡 Ojja kufuna okuddamu kwaabwe wano ku WhatsApp.\n\n"
+    #             f"0️⃣ Main Menu"
+    #         )
+    #     else:
+    #         response_text = localize(
+    #             phone,
+    #             f"⚠️ *Unable to Send Question*\n\n"
+    #             f"📚 Course: {course_name}\n\n"
+    #             f"No WhatsApp-enabled teachers found for this course.\n\n"
+    #             f"Please contact support or try another course.\n\n"
+    #             f"0️⃣ Main Menu",
+    #             f"⚠️ *Tewali Basomesa Baliwoko*\n\n"
+    #             f"📚 Essomo: {course_name}\n\n"
+    #             f"Tewali musomesa alina WhatsApp ku ssomo lino.\n\n"
+    #             f"Tukirira support oba gezaako essomo eddala.\n\n"
+    #             f"0️⃣ Main Menu"
+    #         )
+        
+    #     return twiml_message(response_text)
+
+    # ====== TRAINER QUESTION INPUT HANDLER ======
+    if user_state[phone] == "trainer_question_input":
+        if user_msg in ["0", "menu", "main menu"]:
+            user_state[phone] = "main_menu"
+            if phone in user_moodle_data:
+                user_moodle_data[phone].pop('selected_course', None)
+            return twiml_message(main_menu_text(phone))
+        
+        if user_msg in ["#", "exit"]:
+            user_state.pop(phone, None)
+            clear_session_language(phone)
+            return twiml_message(goodbye_text(phone))
+        
+        # Get the selected course and teachers
+        selected_data = user_moodle_data.get(phone, {}).get('selected_course')
+        
+        if not selected_data:
+            user_state[phone] = "main_menu"
+            response_text = localize(phone, "Session expired. Please start over.", "Session yazze. Sooka ku ntandikwa.")
+            return twiml_message(response_text)
+        
+        course_id = selected_data['id']
+        course_name = selected_data['name']
+        teachers = selected_data['teachers']
+        question = raw_msg
+        
+        # Get the learner's name
+        learner_name = user_moodle_data.get(phone, {}).get('fullname', 'A learner')
+        
+        # Generate unique question ID
+        question_id = f"Q{int(time.time())}_{phone[-6:]}"
+        
+        # Store question for tracking
+        if 'pending_questions' not in user_moodle_data:
+            user_moodle_data['pending_questions'] = {}
+        
+        user_moodle_data['pending_questions'][question_id] = {
+            'learner_phone': phone,
+            'learner_name': learner_name,
+            'course_id': course_id,
+            'course_name': course_name,
+            'question': question,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'pending',
+            'teachers_notified': []
+        }
+        
+        # Send question to each teacher using available contact methods
+        whatsapp_count = 0
+        email_count = 0
+        
+        for teacher in teachers:
+            teacher_name = teacher.get('fullname', 'Teacher')
+            teacher_email = teacher.get('email')
+            teacher_phone = teacher.get('phone')
+            notified = False
+            
+            # Try WhatsApp if phone number exists
+            if teacher_phone:
+                message = (
+                    f"👨‍🏫 *New Question from Student*\n\n"
+                    f"📚 Course: {course_name}\n"
+                    f"👤 Student: {learner_name}\n"
+                    f"📱 Student Phone: {phone}\n"
+                    f"❓ Question: {question}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💡 *To reply to this student:*\n"
+                    f"Send: /reply {question_id} [your answer]\n\n"
+                    f"Example: /reply {question_id} Thank you for your question...\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"✅ The student will receive your reply immediately."
+                )
+                
+                teacher_whatsapp = teacher_phone
+                if not teacher_whatsapp.startswith('whatsapp:'):
+                    teacher_whatsapp = f"whatsapp:{teacher_whatsapp}"
+                
+                success = await _send_whatsapp_message(teacher_whatsapp, message)
+                if success:
+                    whatsapp_count += 1
+                    notified = True
+                    user_moodle_data['pending_questions'][question_id]['teachers_notified'].append({
+                        'name': teacher_name,
+                        'method': 'whatsapp',
+                        'contact': teacher_whatsapp
+                    })
+                    print(f"✅ Notified teacher {teacher_name} via WhatsApp")
+            
+            # Fallback to email if WhatsApp failed or no phone number
+            if not notified and teacher_email:
+                subject = f"[Moodle Support] New Question from {learner_name} - {course_name}"
+                body = f"""
+Dear {teacher_name},
+
+A student has asked a question about {course_name}.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STUDENT INFORMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Name: {learner_name}
+Phone: {phone}
+Course: {course_name}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{question}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW TO REPLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+To reply to this student:
+1. Send a WhatsApp message to: {phone}
+2. Or reply to this email
+
+Reference ID: {question_id}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The student is waiting for your response.
+"""
+                
+                success = await _send_email(teacher_email, subject, body)
+                if success:
+                    email_count += 1
+                    notified = True
+                    user_moodle_data['pending_questions'][question_id]['teachers_notified'].append({
+                        'name': teacher_name,
+                        'method': 'email',
+                        'contact': teacher_email
+                    })
+                    print(f"✅ Notified teacher {teacher_name} via Email to {teacher_email}")
+                else:
+                    print(f"⚠️ Failed to send email to {teacher_name}")
+            
+            if not notified:
+                print(f"⚠️ No contact method for teacher {teacher_name}")
+        
+        total_notified = whatsapp_count + email_count
+        
+        # Clear selected course and return to main menu
+        user_moodle_data[phone].pop('selected_course', None)
+        user_state[phone] = "main_menu"
+        
+        if total_notified > 0:
+            # Build notification summary
+            methods = []
+            if whatsapp_count > 0:
+                methods.append(f"{whatsapp_count} via WhatsApp")
+            if email_count > 0:
+                methods.append(f"{email_count} via Email")
+            
+            response_text = localize(
+                phone,
+                f"✅ *Question Sent Successfully!*\n\n"
+                f"📚 Course: {course_name}\n"
+                f"👨‍🏫 Notified: {total_notified} teacher(s) ({', '.join(methods)})\n"
+                f"❓ Question: {question[:100]}...\n\n"
+                f"📋 Reference ID: {question_id}\n\n"
+                f"Teachers have been notified and will respond shortly.\n\n"
+                f"💡 You will receive their response here on WhatsApp.\n\n"
+                f"0️⃣ Main Menu",
+                f"✅ *Ekibuuzo Kisindikiddwa!*\n\n"
+                f"📚 Essomo: {course_name}\n"
+                f"👨‍🏫 Bamanyisiddwa: {total_notified} omusomesa ({', '.join(methods)})\n"
+                f"❓ Ekibuuzo: {question[:100]}...\n\n"
+                f"📋 Koodi y'ekibuuzo: {question_id}\n\n"
+                f"Abasomesa bamanyisiddwa era bajja kukuddamu mangu.\n\n"
+                f"💡 Ojja kufuna okuddamu kwaabwe wano ku WhatsApp.\n\n"
+                f"0️⃣ Main Menu"
+            )
+        else:
+            response_text = localize(
+                phone,
+                f"⚠️ *Unable to Send Question*\n\n"
+                f"📚 Course: {course_name}\n\n"
+                f"No contact methods available for teachers of this course.\n\n"
+                f"Please contact support or try another course.\n\n"
+                f"0️⃣ Main Menu",
+                f"⚠️ *Tewali Basomesa Baliwoko*\n\n"
+                f"📚 Essomo: {course_name}\n\n"
+                f"Tewali musomesa alina WhatsApp oba email ku ssomo lino.\n\n"
+                f"Tukirira support oba gezaako essomo eddala.\n\n"
+                f"0️⃣ Main Menu"
+            )
+        
+        return twiml_message(response_text)
 
     # ====== QUESTION MODE HANDLER ======
     if user_state[phone] == "question_mode":
@@ -2549,7 +3067,66 @@ async def whatsapp_info():
             "serve-video": "/whatsapp/serve-video"
         }
     }
-
+@router.post("/teacher-reply")
+async def teacher_reply_webhook(Body: str = Form(default=""), From: str = Form(default="")):
+    """Webhook for teachers to reply to learner questions"""
+    raw_msg = (Body or "").strip()
+    teacher_phone = normalize_phone_key(From or "")
+    
+    if not raw_msg:
+        return twiml_message()
+    
+    # Handle reply command
+    if raw_msg.startswith("/reply"):
+        parts = raw_msg.split(" ", 2)
+        if len(parts) >= 3:
+            question_id = parts[1]
+            reply = parts[2]
+            
+            # Get question data
+            pending_questions = user_moodle_data.get('pending_questions', {})
+            question_data = pending_questions.get(question_id)
+            
+            if not question_data or question_data.get('status') != 'pending':
+                response_text = f"❌ Question {question_id} not found or already answered"
+                return twiml_message(response_text)
+            
+            learner_phone = question_data['learner_phone']
+            course_name = question_data['course_name']
+            original_question = question_data['question']
+            
+            # Send reply to learner
+            message = (
+                f"👨‍🏫 *Response from Teacher*\n\n"
+                f"📚 Course: {course_name}\n"
+                f"❓ Your Question: {original_question}\n\n"
+                f"💬 Response:\n{reply}\n\n"
+                f"Reply 5️⃣ to ask another question, or 0️⃣ for main menu."
+            )
+            
+            await _send_whatsapp_message(learner_phone, message)
+            
+            # Update question status
+            question_data['status'] = 'answered'
+            question_data['teacher_reply'] = reply
+            question_data['replied_at'] = datetime.now().isoformat()
+            question_data['teacher_phone'] = teacher_phone
+            
+            response_text = f"✅ Reply sent to learner for question {question_id}"
+        else:
+            response_text = "❌ Use: /reply [question_id] [your answer]\n\nExample: /reply Q12345 Thank you for your question..."
+        
+        return twiml_message(response_text)
+    
+    # Show help for teachers
+    response_text = (
+        "👨‍🏫 *Teacher Commands*\n\n"
+        "To reply to a learner's question:\n"
+        "/reply [question_id] [your answer]\n\n"
+        "Example:\n"
+        "/reply Q12345 Thank you for your question about infection prevention..."
+    )
+    return twiml_message(response_text)
 
 # Startup optimization
 @router.on_event("startup")

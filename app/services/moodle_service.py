@@ -4,6 +4,7 @@ from pathlib import Path
 import requests
 import threading
 import time
+from datetime import datetime
 import asyncio
 import httpx
 import urllib.parse
@@ -1508,3 +1509,221 @@ def get_course_quizzes(course_id: int):
     except Exception as e:
         print(f"❌ Error getting quizzes: {e}")
         return []
+    
+
+# Add these imports at the top if not already there
+
+# ====== TEACHER/TRAINER FUNCTIONS ======
+
+async def get_course_teachers_comprehensive_async(token: str, course_id: int) -> list:
+    """
+    Get all users with ANY teaching-related capability in a course.
+    This captures editing teachers, non-editing teachers, and managers.
+    """
+    # Teaching-related capabilities to check
+    teaching_capabilities = [
+        'moodle/course:manageactivities',   # Editing teacher
+        'moodle/course:update',              # Can update course
+        'moodle/grade:manage',               # Can manage grades
+        'mod/assign:grade',                  # Can grade assignments
+        'moodle/course:viewparticipants',    # Can see participants
+        'moodle/course:enrolreview',         # Can review enrolments
+    ]
+    
+    all_teachers = {}
+    
+    for capability in teaching_capabilities:
+        params = {
+            'wstoken': token,
+            'wsfunction': 'core_enrol_get_enrolled_users',
+            'moodlewsrestformat': 'json',
+            'courseid': course_id,
+            'options[0][name]': 'withcapability',
+            'options[0][value]': capability
+        }
+        
+        try:
+            client = await _get_async_client()
+            response = await client.get(
+                f"{MOODLE_BASE_URL}/webservice/rest/server.php",  # ✅ FIXED: Use MOODLE_BASE_URL
+                params=params
+            )
+            
+            if response.status_code == 200:
+                users = response.json()
+                # Handle case where response might be a dict with exception
+                if isinstance(users, dict) and users.get('exception'):
+                    print(f"⚠️ Moodle API error: {users.get('message')}")
+                    continue
+                    
+                if isinstance(users, list):
+                    for user in users:
+                        if user.get('id') not in all_teachers:
+                            phone = user.get('phone1', '') or user.get('phone2', '')
+                            all_teachers[user['id']] = {
+                                'id': user['id'],
+                                'fullname': user.get('fullname', ''),
+                                'firstname': user.get('firstname', ''),
+                                'lastname': user.get('lastname', ''),
+                                'email': user.get('email', ''),
+                                'phone': phone,
+                                'contact_method': 'whatsapp' if phone else 'email',
+                                'capabilities': [capability]
+                            }
+                        else:
+                            all_teachers[user['id']]['capabilities'].append(capability)
+        except Exception as e:
+            print(f"Error checking capability {capability}: {e}")
+            continue
+    
+    return list(all_teachers.values())
+
+
+async def get_course_teachers_by_role_async(token: str, course_id: int, role_shortname: str = 'editingteacher') -> list:
+    """
+    Fallback: Get users by specific role shortname.
+    Note: This requires the role shortname to be known and consistent.
+    """
+    try:
+        # First, get the role ID for the shortname
+        params_roles = {
+            'wstoken': token,
+            'wsfunction': 'core_role_get_roles',
+            'moodlewsrestformat': 'json',
+        }
+        
+        client = await _get_async_client()
+        response = await client.get(
+            f"{MOODLE_BASE_URL}/webservice/rest/server.php",  # ✅ FIXED: Use MOODLE_BASE_URL
+            params=params_roles
+        )
+        
+        if response.status_code == 200:
+            all_roles = response.json()
+            target_role_id = None
+            for role in all_roles:
+                if role.get('shortname') == role_shortname:
+                    target_role_id = role.get('id')
+                    break
+            
+            if target_role_id:
+                # Get users with this role in the course
+                params_users = {
+                    'wstoken': token,
+                    'wsfunction': 'core_role_assign_get_users_by_roleid',
+                    'moodlewsrestformat': 'json',
+                    'roleid': target_role_id,
+                    'contextid': course_id,  # Course context
+                }
+                
+                response2 = await client.get(
+                    f"{MOODLE_BASE_URL}/webservice/rest/server.php",  # ✅ FIXED
+                    params=params_users
+                )
+                
+                if response2.status_code == 200:
+                    users = response2.json()
+                    print("users",users)
+                    # Format users similarly to the comprehensive function
+                    formatted_users = []
+                    for user in users:
+                        if isinstance(user, dict):
+                            phone = user.get('phone1', '') or user.get('phone2', '')
+                            formatted_users.append({
+                                'id': user.get('id'),
+                                'fullname': user.get('fullname', ''),
+                                'firstname': user.get('firstname', ''),
+                                'lastname': user.get('lastname', ''),
+                                'email': user.get('email', ''),
+                                'phone': phone,
+                                'contact_method': 'whatsapp' if phone else 'email',
+                                'capabilities': [role_shortname]
+                            })
+                    print("formatted_users",formatted_users)
+                    return formatted_users
+
+        
+        return []
+        
+    except Exception as e:
+        print(f"Error getting users by role: {e}")
+        return []
+
+
+# Note: send_to_course_teachers should be in your MAIN whatsapp.py file
+# because it uses _send_whatsapp_message and user_moodle_data
+# But you can define it there, or pass these as parameters
+
+# If you want to keep it in moodle_service.py, you need to pass the send function:
+async def send_to_course_teachers(
+    learner_phone: str, 
+    course_name: str, 
+    course_id: int, 
+    question: str,
+    user_moodle_data: dict,  # Pass this from main file
+    send_whatsapp_func,      # Pass the send function
+    get_fullname_func=None    # Optional function to get learner name
+):
+    """Send learner question to all users with teaching capabilities in the course"""
+    
+    token = user_moodle_data.get(learner_phone, {}).get('token')
+    if not token:
+        print(f"No token for learner {learner_phone}")
+        return None
+    
+    # Get teachers using capability-based filtering
+    teachers = await get_course_teachers_comprehensive_async(token, course_id)
+    
+    if not teachers:
+        # Fallback: try to get users with 'editingteacher' role
+        teachers = await get_course_teachers_by_role_async(token, course_id, 'editingteacher')
+    
+    if not teachers:
+        print(f"No teachers found for course {course_id}")
+        return None
+    
+    # Get learner name
+    learner_name = user_moodle_data.get(learner_phone, {}).get('fullname', 'A learner')
+    if get_fullname_func:
+        learner_name = await get_fullname_func(learner_phone) or learner_name
+    
+    # Generate unique question ID
+    question_id = f"Q{int(time.time())}_{learner_phone[-6:]}"
+    
+    # Store question (you might want to store this in user_moodle_data or a separate dict)
+    if 'pending_questions' not in user_moodle_data:
+        user_moodle_data['pending_questions'] = {}
+    
+    user_moodle_data['pending_questions'][question_id] = {
+        'learner_phone': learner_phone,
+        'course_id': course_id,
+        'course_name': course_name,
+        'question': question,
+        'timestamp': datetime.now().isoformat(),
+        'status': 'pending'
+    }
+    
+    # Send to each teacher
+    notified_count = 0
+    for teacher in teachers:
+        if teacher.get('contact_method') == 'whatsapp' and teacher.get('phone'):
+            message = (
+                f"👨‍🏫 *New Question from Learner*\n\n"
+                f"📚 Course: {course_name}\n"
+                f"👤 Learner: {learner_name}\n"
+                f"❓ Question: {question}\n\n"
+                f"💡 Reply: /reply {question_id} [your answer]\n\n"
+                f"Example: /reply {question_id} Thank you for your question..."
+            )
+            
+            teacher_whatsapp = teacher['phone']
+            if not teacher_whatsapp.startswith('whatsapp:'):
+                teacher_whatsapp = f"whatsapp:{teacher_whatsapp}"
+            
+            # Use the passed send function
+            await send_whatsapp_func(teacher_whatsapp, message)
+            notified_count += 1
+            print(f"Notified teacher {teacher['fullname']} at {teacher_whatsapp}")
+    
+    print(f"Notified {notified_count} teachers for course {course_id}")
+    return question_id
