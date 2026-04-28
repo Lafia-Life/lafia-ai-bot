@@ -1411,6 +1411,11 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
 
     # ====== FIRST CONTACT ======
     if phone not in user_state:
+        # If we already remember the user's language preference, don't force
+        # the language selection flow again — go straight to main menu.
+        if phone in user_language:
+            user_state[phone] = "main_menu"
+            return twiml_message(main_menu_text(phone, first_time=True))
         user_state[phone] = "language_selection"
         return twiml_message(language_selection_text())
 

@@ -1,6 +1,6 @@
 # WhatsApp Webhook Stress Test Report
 
-Date: 2026-04-09 (Africa/Kampala)
+Date: 2026-04-10 (Africa/Kampala)
 Target: https://chat.lafialife.com/webhook/
 Test method: Direct HTTP POST (Twilio-style form-encoded), no Twilio involvement
 Load generator: Local machine using `/Users/praisewebsolutions/chatlearning/stress_whatsapp_webhook.py`
@@ -23,17 +23,14 @@ python3 /Users/praisewebsolutions/chatlearning/stress_whatsapp_webhook.py \
 
 Result summary:
 - Total requests: 1,000
-- Success: 0
-- Errors: 1,000 (100%)
-- Duration: 25.22s
-- Throughput: 39.65 req/s
-- Latency p50/p95/p99: 16,526 / 23,333 / 24,616 ms
-- Status counts: exception=1000
+- Success: 287
+- Errors: 713 (71.30%)
+- Duration: 24.48s
+- Throughput: 40.86 req/s
+- Latency p50/p95/p99: 20,064 / 20,698 / 21,096 ms
+- Status counts: 200=287, exception=713
 - Top errors:
-  - TLS handshake timeout
-  - Connection timeout
-  - Connection reset by peer
-  - Read timeout
+  - Request timeout (client-side)
 
 ### 2) Steady test (100 req/s for 60s, concurrency 200)
 Command:
@@ -49,29 +46,61 @@ python3 /Users/praisewebsolutions/chatlearning/stress_whatsapp_webhook.py \
 ```
 
 Result summary:
-- Total requests: 6,000
-- Success: 35
-- Errors: 5,965 (99.42%)
-- Duration: 176.10s (longer than planned due to timeouts)
-- Throughput: 34.07 req/s
-- Latency p50/p95/p99: 154 / 18,168 / 23,386 ms
-- Status counts: 200=35, exception=5965
+- Total requests: 3,533
+- Success: 2,949
+- Errors: 584 (16.53%)
+- Duration: 188.64s (longer than planned due to timeouts)
+- Throughput: 18.73 req/s
+- Latency p50/p95/p99: 5,550 / 25,141 / 35,858 ms
+- Status counts: 200=2949, exception=584
 - Top errors:
-  - DNS resolution error (nodename nor servname provided)
-  - TLS handshake timeout
-  - Remote end closed connection
-  - Connection reset by peer
-  - Read timeout
+  - Request timeout (client-side)
+
+### 3) Origin test (app only)
+Command:
+```bash
+python3 /var/www/chat.lafialife.com/stress_whatsapp_webhook.py \
+  --url http://127.0.0.1:8000/webhook/ \
+  --mode burst --users 1000 --timeout 10
+```
+
+Result summary:
+- Total requests: 1,000
+- Success: 1,000
+- Errors: 0 (0.00%)
+- Duration: 1.58s
+- Throughput: 633.81 req/s
+- Latency p50/p95/p99: 10.54 / 29.02 / 367.25 ms
+- Status counts: 200=1000
+
+### 4) Nginx loopback test (domain → 127.0.0.1)
+Command:
+```bash
+python3 /var/www/chat.lafialife.com/stress_whatsapp_webhook.py \
+  --url http://chat.lafialife.com/webhook/ \
+  --resolve-host chat.lafialife.com \
+  --resolve-ip 127.0.0.1 \
+  --mode burst --users 1000 --timeout 10
+```
+
+Result summary:
+- Total requests: 1,000
+- Success: 1,000
+- Errors: 0 (0.00%)
+- Duration: 1.62s
+- Throughput: 618.22 req/s
+- Latency p50/p95/p99: 10.30 / 32.63 / 533.77 ms
+- Status counts: 200=1000
 
 ## Interpretation
-- A single direct POST to the webhook returns HTTP 200 with valid TwiML, confirming the endpoint is reachable and functional.
-- Under high concurrency from a **local load generator**, almost all requests failed due to **network- or edge-level failures** (TLS handshake timeouts, DNS errors, connection resets).
-- This means **we cannot confirm 1,000-user support** from this test run. The failures are dominated by connection issues before the app can respond consistently.
+- A single direct POST to the webhook still returns HTTP 200 with valid TwiML, confirming the endpoint is reachable and functional.
+- The **origin and Nginx loopback tests both passed** at 1,000 concurrent requests with low latency.
+- Under external load, the **error rate is high** and latency spikes, indicating the bottleneck is **edge/network/TLS/WAF** rather than the application itself.
 
 ## Limitations
 - Load generator ran locally, which may not reflect real traffic from Twilio’s infrastructure.
-- Cloudflare or edge rate limiting may be throttling or dropping connections during burst tests.
-- DNS and TLS timeouts suggest local network limits or upstream throttling.
+- Edge protections (Cloudflare/WAF) may be throttling or dropping connections during burst tests.
+- The steady test took significantly longer than planned due to timeouts, so the measured throughput is below the target rate.
 
 ## Recommendations (Next Steps)
 1. **Run the same tests from a server close to production** (same region/VPC) to reduce network noise.
