@@ -1399,6 +1399,13 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     base_url = BASE_URL
     courses_cache_local = None
 
+    # Debug: log normalized phone and session state to help diagnose repeated language prompts
+    try:
+        print(f"[whatsapp] From raw='{From}' normalized='{phone}' user_state=" +
+              f"{user_state.get(phone)!r} user_language_present={phone in user_language}")
+    except Exception:
+        pass
+
     async def get_courses(force_refresh: bool = False):
         nonlocal courses_cache_local
         if force_refresh or courses_cache_local is None:
@@ -1411,50 +1418,32 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
 
     # ====== FIRST CONTACT ======
     if phone not in user_state:
-        # If we already remember the user's language preference, don't force
-        # the language selection flow again — go straight to main menu.
-        if phone in user_language:
-            user_state[phone] = "main_menu"
-            return twiml_message(main_menu_text(phone, first_time=True))
-        user_state[phone] = "language_selection"
-        return twiml_message(language_selection_text())
+        # Default new sessions to English unless user chooses to change later.
+        if phone not in user_language:
+            set_session_language(phone, "en")
+        user_state[phone] = "main_menu"
+        return twiml_message(main_menu_text(phone, first_time=True))
 
-    # ====== LANGUAGE SELECTION ======
-    if user_state.get(phone) in {"language_selection", "language_selection_menu"}:
-        change_mode = user_state.get(phone) == "language_selection_menu"
-        first_time = not change_mode
+    # ====== LANGUAGE CHANGE MENU ======
+    # Only handle the change-mode language selection triggered from main menu.
+    if user_state.get(phone) == "language_selection_menu":
+        # change_mode is always True here
         if user_msg in {"1", "english", "en"}:
             set_session_language(phone, "en")
             user_state[phone] = "main_menu"
-            if change_mode:
-                return twiml_message(
-                    localize(
-                        phone,
-                        "✅ Language changed to English.\n\n",
-                        "✅ Olulimi lukyusiddwa ne lufuuka Lungereza.\n\n"
-                    ) + main_menu_text(phone)
-                )
-            return twiml_message(main_menu_text(phone, first_time=first_time))
+            return twiml_message(localize(phone, "✅ Language changed to English.\n\n", "✅ Olulimi lukyusiddwa ne lufuuka Lungereza.\n\n") + main_menu_text(phone))
         if user_msg in {"2", "luganda", "lg"}:
             set_session_language(phone, "lg")
             user_state[phone] = "main_menu"
-            if change_mode:
-                return twiml_message(
-                    localize(
-                        phone,
-                        "✅ Language changed to Luganda.\n\n",
-                        "✅ Olulimi lukyusiddwa ne lufuuka Luganda.\n\n"
-                    ) + main_menu_text(phone)
-                )
-            return twiml_message(main_menu_text(phone, first_time=first_time))
-        if change_mode and user_msg in {"0", "menu", "main menu"}:
+            return twiml_message(localize(phone, "✅ Language changed to Luganda.\n\n", "✅ Olulimi lukyusiddwa ne lufuuka Luganda.\n\n") + main_menu_text(phone))
+        if user_msg in {"0", "menu", "main menu"}:
             user_state[phone] = "main_menu"
             return twiml_message(main_menu_text(phone))
         if user_msg in {"#", "exit", "quit"}:
             user_state.pop(phone, None)
             clear_session_language(phone)
             return twiml_message(goodbye_text(phone))
-        return twiml_message(language_selection_text(invalid=True, change_mode=change_mode))
+        return twiml_message(language_selection_text(invalid=True, change_mode=True))
 
     # ====== CHECK FOR MOODLE LOGIN FLOW FIRST ======
     if user_state.get(phone, "") in ["moodle_username", "moodle_password"]:
