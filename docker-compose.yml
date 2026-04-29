@@ -16,19 +16,33 @@ services:
 
   app:
     build: .
+
     ports:
       - "8000:8000"
+
     env_file:
       - .env
+
+    # 🔥 CRITICAL: ensures Python resolves paths correctly
+    working_dir: /app
+
+    # production file descriptor limits
     ulimits:
       nofile:
         soft: 65535
         hard: 65535
+
+    # persistent storage for PDFs, OCR, embeddings, Chroma DB
     volumes:
       - chatlearning_data:/app/storage
+
     restart: unless-stopped
+
+    # 🔥 FIX: ensures required folders exist BEFORE app starts
     command: >
-      gunicorn app.main:app
+      sh -c "
+      mkdir -p /app/storage/data /app/storage/uploads /app/storage/chroma
+      && exec gunicorn app.main:app
       -k uvicorn.workers.UvicornWorker
       -w ${WEB_CONCURRENCY:-4}
       --bind 0.0.0.0:8000
@@ -37,6 +51,7 @@ services:
       --keep-alive 5
       --access-logfile -
       --error-logfile -
+      "
 
 volumes:
   chatlearning_data:
