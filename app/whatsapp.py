@@ -77,8 +77,10 @@ document_path_cache = {}
 courses_cache = {}
 user_moodle_data = {} 
 user_language = {}
+recent_inbound_messages = {}
 courses_cache_timestamp = 0
 CACHE_DURATION = 300  # 5 minutes
+WHATSAPP_DUPLICATE_WINDOW_SECONDS = float(os.getenv("WHATSAPP_DUPLICATE_WINDOW_SECONDS", "4"))
 
 # ====== NEW: MOODLE USER AUTHENTICATION STORAGE ======
 user_moodle_data = {} 
@@ -257,6 +259,75 @@ def set_session_language(phone: str, language: str) -> None:
 
 def clear_session_language(phone: str) -> None:
     user_language.pop(phone, None)
+
+
+def is_moodle_session_active(phone: str) -> bool:
+    session = user_moodle_data.get(phone) or {}
+    return bool(session.get("token") and session.get("userid"))
+
+
+def login_step_prompt(phone: str, state: str | None = None) -> Response:
+    state = state or user_state.get(phone)
+    if state == "moodle_password":
+        return twiml_message(
+            localize(
+                phone,
+                "🔐 *Moodle Login*\n\nPlease enter your Moodle password:",
+                "🔐 *Okweyingiza ku Moodle*\n\nWandiika akasumuluzo ko aka Moodle:",
+            )
+        )
+    return twiml_message(
+        localize(
+            phone,
+            "🔐 *Login Required*\n\nPlease enter your Moodle username:",
+            "🔐 *Okweyingiza Kwetaagisa*\n\nWandiika erinnya lyo ery'okweyingiza ku Moodle:",
+        )
+    )
+
+
+def is_duplicate_login_delivery(phone: str, raw_msg: str) -> bool:
+    """Ignore provider retries so menu numbers/usernames are not consumed twice."""
+    current_state = user_state.get(phone)
+    if current_state not in {"moodle_username", "moodle_password"}:
+        return False
+
+    last = recent_inbound_messages.get(phone)
+    if not last:
+        return False
+
+    return (
+        last.get("body") == raw_msg
+        and time.time() - float(last.get("timestamp", 0)) <= WHATSAPP_DUPLICATE_WINDOW_SECONDS
+    )
+
+
+def remember_inbound_message(phone: str, raw_msg: str) -> None:
+    if len(recent_inbound_messages) > 5000:
+        cutoff = time.time() - 60
+        stale_phones = [
+            key
+            for key, value in recent_inbound_messages.items()
+            if float(value.get("timestamp", 0)) < cutoff
+        ]
+        for key in stale_phones:
+            recent_inbound_messages.pop(key, None)
+
+    recent_inbound_messages[phone] = {
+        "body": raw_msg,
+        "timestamp": time.time(),
+    }
+
+
+def is_greeting_message(user_msg: str) -> bool:
+    return user_msg in {
+        "hi",
+        "hello",
+        "hey",
+        "start",
+        "menu",
+        "main menu",
+        "help",
+    }
 
 
 def localize(phone: str, english: str, luganda: str) -> str:
@@ -974,6 +1045,16 @@ def create_moodle_pdf_response(pdfs, course_name, phone: str | None = None):
 
 async def handle_moodle_login_flow(phone, raw_msg):
     state = user_state.get(phone)
+    user_msg = raw_msg.strip().lower()
+
+    if user_msg in {"0", "menu", "main menu"}:
+        user_state[phone] = "main_menu"
+        return twiml_message(main_menu_text(phone))
+
+    if user_msg in {"#", "exit", "quit"}:
+        user_state.pop(phone, None)
+        clear_session_language(phone)
+        return twiml_message(goodbye_text(phone))
 
     # ===== USERNAME STEP =====
     if state == "moodle_username":
@@ -1187,6 +1268,8 @@ async def handle_moodle_login_flow(phone, raw_msg):
                 # Handle enrollment
                 course_id = intent['course_id']
                 course_name = intent['course_name']
+                courses = await get_available_courses_async()
+                course_data = courses.get(str(course_id), {"name": course_name, "quizzes": []})
 
                 enrolled = await enroll_user_in_course_async(
                     token=auth_result['token'],
@@ -1416,13 +1499,19 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     if not phone or not raw_msg:
         return twiml_message()
 
+    if is_duplicate_login_delivery(phone, raw_msg):
+        return login_step_prompt(phone)
+
+    remember_inbound_message(phone, raw_msg)
+
     # ====== FIRST CONTACT ======
     if phone not in user_state:
         # Default new sessions to English unless user chooses to change later.
         if phone not in user_language:
             set_session_language(phone, "en")
         user_state[phone] = "main_menu"
-        return twiml_message(main_menu_text(phone, first_time=True))
+        if is_greeting_message(user_msg):
+            return twiml_message(main_menu_text(phone, first_time=True))
 
     # ====== LANGUAGE CHANGE MENU ======
     # Only handle the change-mode language selection triggered from main menu.
@@ -1498,7 +1587,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 
         elif user_msg in ["2", "enrolled"]:
             # Check if user is logged into Moodle
-            if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
+            if is_moodle_session_active(phone):
                 # User is logged in - show their enrolled courses
                 token = user_moodle_data[phone]['token']
                 userid = user_moodle_data[phone]['userid']
@@ -1557,7 +1646,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
 
         elif user_msg in ["3", "quiz"]:
             # Check if user is logged into Moodle
-            if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
+            if is_moodle_session_active(phone):
                 # User is logged in - show their enrolled courses
                 token = user_moodle_data[phone]['token']
                 userid = user_moodle_data[phone]['userid']
@@ -1870,7 +1959,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
             clear_session_language(phone)
         else:
             # Get user's enrolled courses
-            if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
+            if is_moodle_session_active(phone):
                 token = user_moodle_data[phone]['token']
                 userid = user_moodle_data[phone]['userid']
                 enrolled_courses = await get_user_enrolled_courses_moodle_async(token, userid)
@@ -2001,7 +2090,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                     selected_course = all_courses[selected_course_id]
                                         
                     # CHECK IF USER IS LOGGED IN
-                    if phone not in user_moodle_data or 'token' not in user_moodle_data.get(phone, {}):
+                    if not is_moodle_session_active(phone):
                         # Store original intent for after login
                         user_moodle_data.setdefault(phone, {})
                         user_moodle_data[phone]['original_intent'] = {
@@ -2095,7 +2184,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
     for course_id, course_data in courses.items():
         if user_state[phone] == f"enrolled_{course_id}":
             # Check if user is logged in
-            if phone not in user_moodle_data or 'token' not in user_moodle_data[phone]:
+            if not is_moodle_session_active(phone):
                 response_text = localize(phone, "Please login to access course materials.", "Sooka weyingize okufuna ebikozesebwa by'essomo.")
                 return twiml_message(response_text)
             
@@ -2328,7 +2417,7 @@ async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default=
                 
             if user_msg == "1":
                 # Check if user is logged into Moodle
-                if phone in user_moodle_data and 'token' in user_moodle_data[phone]:
+                if is_moodle_session_active(phone):
                     # User is logged in - try to enroll
                     token = user_moodle_data[phone]['token']
                     userid = user_moodle_data[phone]['userid']
