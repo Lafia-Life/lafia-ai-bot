@@ -28,6 +28,7 @@ from pathlib import Path
 import time
 import asyncio
 import threading
+import fcntl
 from app.services.moodle_service import (
     get_available_courses, 
     get_available_courses_async,
@@ -81,6 +82,7 @@ recent_inbound_messages = {}
 courses_cache_timestamp = 0
 CACHE_DURATION = 300  # 5 minutes
 WHATSAPP_DUPLICATE_WINDOW_SECONDS = float(os.getenv("WHATSAPP_DUPLICATE_WINDOW_SECONDS", "4"))
+WHATSAPP_SESSION_FILE = Path(os.getenv("WHATSAPP_SESSION_FILE", "storage/data/whatsapp_sessions.json"))
 
 # ====== NEW: MOODLE USER AUTHENTICATION STORAGE ======
 user_moodle_data = {} 
@@ -328,6 +330,54 @@ def is_greeting_message(user_msg: str) -> bool:
         "main menu",
         "help",
     }
+
+
+def load_whatsapp_sessions() -> None:
+    WHATSAPP_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not WHATSAPP_SESSION_FILE.exists():
+        return
+
+    try:
+        with WHATSAPP_SESSION_FILE.open("r", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            try:
+                data = json.load(f)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except (OSError, ValueError) as e:
+        print(f"⚠️ Could not load WhatsApp sessions: {e}")
+        return
+
+    user_state.clear()
+    user_state.update(data.get("user_state") or {})
+    user_moodle_data.clear()
+    user_moodle_data.update(data.get("user_moodle_data") or {})
+    user_language.clear()
+    user_language.update(data.get("user_language") or {})
+    recent_inbound_messages.clear()
+    recent_inbound_messages.update(data.get("recent_inbound_messages") or {})
+
+
+def save_whatsapp_sessions() -> None:
+    WHATSAPP_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = WHATSAPP_SESSION_FILE.with_suffix(".tmp")
+    data = {
+        "user_state": user_state,
+        "user_moodle_data": user_moodle_data,
+        "user_language": user_language,
+        "recent_inbound_messages": recent_inbound_messages,
+    }
+
+    try:
+        with temp_path.open("w", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        temp_path.replace(WHATSAPP_SESSION_FILE)
+    except OSError as e:
+        print(f"⚠️ Could not save WhatsApp sessions: {e}")
 
 
 def localize(phone: str, english: str, luganda: str) -> str:
@@ -1474,8 +1524,16 @@ def create_quiz_response(course_data, base_url: str = BASE_URL):
     return raw_xml
 
 
-@router.post("/")  
+@router.post("/")
 async def whatsapp_reply(Body: str = Form(default=""), From: str = Form(default="")):
+    load_whatsapp_sessions()
+    try:
+        return await _whatsapp_reply_impl(Body=Body, From=From)
+    finally:
+        save_whatsapp_sessions()
+
+
+async def _whatsapp_reply_impl(Body: str = "", From: str = ""):
     raw_msg = (Body or "").strip()
     user_msg = raw_msg.lower()
     phone = normalize_phone_key(From or "")

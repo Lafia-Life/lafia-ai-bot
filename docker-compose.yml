@@ -44,7 +44,7 @@ services:
       mkdir -p /app/storage/data /app/storage/uploads /app/storage/chroma
       && exec gunicorn app.main:app
       -k uvicorn.workers.UvicornWorker
-      -w ${WEB_CONCURRENCY:-4}
+      -w ${WEB_CONCURRENCY:-1}
       --bind 0.0.0.0:8000
       --timeout 120
       --graceful-timeout 30
