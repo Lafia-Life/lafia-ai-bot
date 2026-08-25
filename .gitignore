@@ -3,3 +3,7 @@ __pycache__/
 storage/chroma/
 storage/uploads/
 *.sqlite
+venv/
+__pycache__/
+*.pyc
+.env
