@@ -2520,7 +2520,11 @@ async def _whatsapp_reply_impl(Body: str = "", From: str = ""):
                 
             elif user_msg == "0":
                 user_state[phone] = "main_menu"
-                response_text = localize(phone, "Returning to main menu...", "Okudda ku main menu...")
+                response_text = (
+                    localize(phone, "Returning to main menu...", "Okudda ku main menu...")
+                    + "\n\n"
+                    + main_menu_text(phone)
+                )
                 
             else:
                 response_text = (
