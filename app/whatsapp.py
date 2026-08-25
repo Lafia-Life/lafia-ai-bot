@@ -982,6 +982,7 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
     """
     try:
         max_video_bytes = int(os.getenv("WHATSAPP_MAX_VIDEO_BYTES", str(15 * 1024 * 1024)))
+        max_source_video_bytes = int(os.getenv("WHATSAPP_MAX_SOURCE_VIDEO_BYTES", str(512 * 1024 * 1024)))
         parsed = urlparse(moodle_url)
         normalized_path = parsed.path or ""
         if "/webservice/pluginfile.php/" not in normalized_path and "/pluginfile.php/" in normalized_path:
@@ -1032,14 +1033,14 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
                 if head_response.status_code >= 400:
                     print(f"HEAD check failed ({head_response.status_code}), trying GET anyway...")
                 content_length = int(head_response.headers.get("content-length") or 0)
-                if content_length and content_length > max_video_bytes:
-                    print(f"Video too large for WhatsApp ({content_length} bytes), skipping")
+                if content_length and content_length > max_source_video_bytes:
+                    print(f"Video exceeds processing limit ({content_length} bytes), skipping")
                     continue
             except requests.RequestException as head_error:
                 print(f"HEAD check error ({head_error}), trying GET anyway...")
 
             print("\nDownloading...")
-            get_response = requests.get(download_url, headers=headers, stream=True, timeout=60, verify=False)
+            get_response = requests.get(download_url, headers=headers, stream=True, timeout=300, verify=False)
             print("download response",get_response)
             if get_response.status_code != 200:
                 print(f"Video download failed (GET {get_response.status_code})")
@@ -1051,25 +1052,72 @@ def download_and_store_video(moodle_url, course_id, video_title, token):
                 print(f"📄 Non-video response: {sample[:120]}")
                 continue
 
+            with tempfile.NamedTemporaryFile(
+                prefix="moodle-video-",
+                suffix=source_ext,
+                dir=videos_dir,
+                delete=False,
+            ) as source_file:
+                source_path = Path(source_file.name)
             downloaded = 0
-            with open(local_path, "wb") as f:
+            with open(source_path, "wb") as f:
                 for chunk in get_response.iter_content(8192):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        if downloaded > max_video_bytes:
-                            print(f"Downloaded file exceeded WhatsApp limit ({downloaded} bytes), skipping")
+                        if downloaded > max_source_video_bytes:
+                            print(f"Downloaded file exceeded processing limit ({downloaded} bytes), skipping")
                             break
 
             if downloaded < 1000:
                 print("File too small")
-                local_path.unlink(missing_ok=True)
-                continue
-            if downloaded > max_video_bytes:
-                local_path.unlink(missing_ok=True)
+                source_path.unlink(missing_ok=True)
                 continue
 
-            return str(local_path)
+            if downloaded <= max_video_bytes:
+                shutil.move(str(source_path), str(local_path))
+                return str(local_path)
+
+            # WhatsApp has a hard media-size limit. Compress oversized Moodle
+            # videos locally instead of rejecting them outright.
+            compressed_path = local_path.with_suffix(".mp4")
+            compression_profiles = (
+                ("480:-2", "30", "48k"),
+                ("360:-2", "34", "32k"),
+            )
+            compressed = False
+            for scale, crf, audio_bitrate in compression_profiles:
+                compressed_path.unlink(missing_ok=True)
+                try:
+                    result = subprocess.run(
+                        [
+                            "ffmpeg", "-y", "-i", str(source_path),
+                            "-vf", f"scale={scale}",
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", crf,
+                            "-c:a", "aac", "-b:a", audio_bitrate,
+                            "-movflags", "+faststart", str(compressed_path),
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        timeout=300,
+                        check=False,
+                    )
+                except (FileNotFoundError, subprocess.TimeoutExpired) as compression_error:
+                    print(f"Video compression unavailable or timed out: {compression_error}")
+                    break
+
+                if result.returncode == 0 and compressed_path.exists() and compressed_path.stat().st_size <= max_video_bytes:
+                    compressed = True
+                    break
+
+            source_path.unlink(missing_ok=True)
+            if compressed:
+                print(f"✅ Compressed video to {compressed_path.stat().st_size} bytes")
+                return str(compressed_path)
+
+            print(f"❌ Could not compress video below WhatsApp limit ({max_video_bytes} bytes)")
+            compressed_path.unlink(missing_ok=True)
+            continue
 
         return None
 
