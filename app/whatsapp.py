@@ -149,17 +149,93 @@ async def _send_whatsapp_media(phone: str, body: str, media_url: str) -> bool:
     to_number = _format_whatsapp_number(phone)
     from_number = _format_whatsapp_number(TWILIO_WHATSAPP_NUMBER)
     try:
-        await run_blocking(
+        message = await run_blocking(
             client.messages.create,
             body=body,
             from_=from_number,
             to=to_number,
             media_url=[media_url],
         )
+        print(f"✅ WhatsApp media accepted for {phone}: {getattr(message, 'sid', 'unknown')}")
         return True
     except Exception as e:
-        print(f"❌ Twilio media send failed: {e}")
+        print(f"❌ Twilio media send failed for {phone} ({media_url}): {e}")
         return False
+
+
+def _public_base_url(base_url: str | None) -> str:
+    """Return a usable public origin for Twilio's media fetch."""
+    return (base_url or "").strip().rstrip("/")
+
+
+async def _process_and_send_videos(
+    phone: str,
+    video_urls: list[dict],
+    course_name: str,
+    course_id: str,
+    token: str | None,
+    base_url: str | None,
+) -> None:
+    """Download course videos and report the actual WhatsApp delivery result."""
+    public_base_url = _public_base_url(base_url)
+    delivered = 0
+    failed: list[dict] = []
+
+    for video in video_urls:
+        video_title = video.get("title", "Video")
+        video_url = video.get("url", "")
+        if not video_url:
+            continue
+
+        try:
+            local_path = await run_blocking(
+                download_and_store_video,
+                video_url,
+                course_id,
+                video_title,
+                token,
+            )
+            if not local_path or not public_base_url:
+                failed.append(video)
+                if not public_base_url:
+                    print("❌ Cannot send video: BASE_URL is not configured")
+                continue
+
+            filename = os.path.basename(local_path)
+            server_url = f"{public_base_url}/webhook/serve-video/{quote(filename)}"
+            if await _send_whatsapp_media(phone, f"🎥 {video_title}", server_url):
+                delivered += 1
+            else:
+                failed.append(video)
+        except Exception as e:
+            print(f"❌ Error preparing {video_title}: {e}")
+            failed.append(video)
+
+    # Do not claim success when Twilio did not accept the media. The original
+    # Moodle URL is still useful to the learner and is the same path as option 1.
+    if failed:
+        await _send_whatsapp_message(
+            phone,
+            localize(
+                phone,
+                f"⚠️ {len(failed)} video(s) could not be sent as WhatsApp media. Here are the direct links:",
+                f"⚠️ Vidiyo {len(failed)} tezisobosezza kusindikibwa nga media ya WhatsApp. Zino ze link ezitereevu:",
+            ),
+        )
+        for index, video in enumerate(failed, start=1):
+            await _send_whatsapp_message(
+                phone,
+                f"🎥 {index}. {video.get('title', 'Video')}\n{video.get('url', '')}",
+            )
+
+    await _send_whatsapp_message(
+        phone,
+        localize(
+            phone,
+            f"✅ Delivery finished: {delivered} of {len(video_urls)} video(s) sent as WhatsApp media. Reply 0 for main menu or 9 to go back.",
+            f"✅ Okusindika kuwedde: vidiyo {delivered} ku {len(video_urls)} zisindikiddwa nga media ya WhatsApp. Ddamu ne 0 okudda ku main menu oba 9 okuddayo.",
+        ),
+    )
 
 
 async def _outbound_worker():
@@ -193,42 +269,14 @@ async def _outbound_worker():
                     ),
                 )
 
-                for video in video_urls:
-                    video_title = video.get('title', 'Video')
-                    video_url = video.get('url', '')
-                    if not video_url:
-                        continue
-                    try:
-                        local_path = await run_blocking(
-                            download_and_store_video,
-                            video_url,
-                            course_id,
-                            video_title,
-                            token,
-                        )
-                        if local_path and base_url:
-                            filename = os.path.basename(local_path)
-                            server_url = f"{base_url}/webhook/serve-video/{quote(filename)}"
-                            await _send_whatsapp_media(phone, f"🎥 {video_title}", server_url)
-                        else:
-                            await _send_whatsapp_message(
-                                phone,
-                                localize(
-                                    phone,
-                                    f"⚠️ Could not attach {video_title}. Link: {video_url}",
-                                    f"⚠️ Sisobode okusibira {video_title}. Link: {video_url}",
-                                ),
-                            )
-                    except Exception as e:
-                        print(f"❌ Video download task error: {e}")
-                        await _send_whatsapp_message(
-                            phone,
-                            localize(
-                                phone,
-                                f"⚠️ Error downloading {video_title}. Link: {video_url}",
-                                f"⚠️ Wabaddewo obuzibu mu kka {video_title}. Link: {video_url}",
-                            ),
-                        )
+                await _process_and_send_videos(
+                    phone,
+                    video_urls,
+                    course_name,
+                    course_id,
+                    token,
+                    base_url,
+                )
         except Exception as e:
             print(f"❌ Outbound worker error: {e}")
         finally:
@@ -2403,49 +2451,17 @@ async def _whatsapp_reply_impl(Body: str = "", From: str = ""):
                     f"🎥 Nkka vidiyo {len(video_urls)} ez'essomo {course_name}. Nja kuzisindika mangu..."
                 )
                 
-                # Process videos asynchronously
-                async def process_and_send_videos():
-                    for video in video_urls:
-                        video_title = video.get('title', 'Video')
-                        video_url = video.get('url', '')
-                        
-                        if video_url:
-                            try:
-                                # Download video
-                                local_path = await run_blocking(
-                                    download_and_store_video, 
-                                    video_url, 
-                                    course_id, 
-                                    video_title, 
-                                    token
-                                )
-                                
-                                if local_path and base_url:
-                                    filename = os.path.basename(local_path)
-                                    server_url = f"{base_url}/webhook/serve-video/{quote(filename)}"
-                                    
-                                    # Send as separate media message
-                                    await _send_whatsapp_media(phone, f"🎥 {video_title}", server_url)
-                                    
-                            except Exception as e:
-                                print(f"Error with {video_title}: {e}")
-                                await _send_whatsapp_message(
-                                    phone, 
-                                    f"⚠️ Could not download: {video_title}"
-                                )
-                    
-                    # Send completion message
-                    await _send_whatsapp_message(
-                        phone,
-                        localize(
-                            phone,
-                            "✅ All videos sent! Reply 0 for main menu or 9 to go back.",
-                            "✅ Vidiyo zonna zisindikiddwa! Ddamu ne 0 okudda ku main menu oba 9 okuddayo."
-                        )
-                    )
-                
                 # Start background task
-                asyncio.create_task(process_and_send_videos())
+                asyncio.create_task(
+                    _process_and_send_videos(
+                        phone,
+                        video_urls,
+                        course_name,
+                        course_id,
+                        token,
+                        base_url,
+                    )
+                )
                 
                 # Return immediate acknowledgment
                 return twiml_message(ack_text)
