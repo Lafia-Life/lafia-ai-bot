@@ -15,6 +15,11 @@ PDF. Lafia is **not** a diagnosis tool and does not replace a health worker.
 > unless the user enables saving on their device. Read
 > [`docs/SAFETY_AND_PRIVACY.md`](docs/SAFETY_AND_PRIVACY.md) and
 > [`SECURITY.md`](SECURITY.md) before using real health data.
+>
+> **UNICEF FemTech reviewers:** start with
+> [`docs/UNICEF_FEMTECH_APPLICATION.md`](docs/UNICEF_FEMTECH_APPLICATION.md)
+> (application pack, budget, demo script) and
+> [`docs/UNICEF_FEMTECH_FIT.md`](docs/UNICEF_FEMTECH_FIT.md) (readiness snapshot).
 
 ## Screens
 
@@ -34,16 +39,37 @@ One codebase, three screens, responsive from 390px phones to desktop.
 
 ## What it does
 
+- **Full-width three-column workspace:** left navigation sidebar, centre chat and
+  desktop Sources panel.
+- Sidebar: New chat, Chat, Find care, Knowledge base, recent questions,
+  language picker and Delete my chats.
 - Language picker: English, Kiswahili, Luganda, Acholi, Ateso, Lusoga, with
   English fallback for missing strings.
 - Required “not a diagnosis” consent before chat.
 - Streaming answers with markdown, WHO/document source chips and a Listen button.
 - Voice input through the browser Speech Recognition API.
-- **Quick exit** button and Escape-twice shortcut using `location.replace`.
+- Speech output through the browser; Listen is hidden when no matching voice
+  exists for the chosen language.
+- **Quick exit** pill and Escape-twice shortcut using `location.replace`.
 - **Find care** with one-time browser geolocation, client-side distances and
   clearly marked placeholder facilities from `data/facilities.json`.
-- Desktop Sources panel and an opt-in “Save my chats on this device” switch.
+- Desktop **Sources** panel with “WHO guidance” cards and Open-on-WHO links.
+- Desktop **Your data** card and an opt-in “Save my chats on this device” switch.
 - Delete-my-chats control that removes all browser-stored chat data.
+- Mobile: the sidebar becomes a drawer; sources and data controls move into a
+  sheet.
+
+## Current status
+
+| Area | Status |
+| --- | --- |
+| UI | Working: responsive three-screen workspace, six-language i18n, full-width desktop layout |
+| Answers | Working: runtime WHO retrieval, citations, language-aware prompting |
+| Voice | Working in supported browsers; Listen hidden when no matching voice exists |
+| Privacy | Working: consent, no account, chats off by default, local-only saving, delete, Quick exit, local-only location |
+| Open source | MIT + CC BY 4.0 files in place; public release pending secret rotation and history purge |
+| Clinical/field validation | Not yet done |
+| Impact measurement | Not yet done |
 
 ## Quick start (under 10 minutes)
 
@@ -157,14 +183,28 @@ prompting, no server answer cache, and privacy-related ignore rules.
 
 - Uploaded documents are shared across users; per-user isolation is not done.
 - The LLM provider sees the question and retrieved context.
-- Low-resource translations (Acholi, Ateso, Lusoga) need human review.
-- Facility names, numbers and hours are placeholders.
-- No rate limiting, clinical governance or DPIA yet.
+- Low-resource translations (Acholi, Ateso, Lusoga) are machine-drafted and need
+  native-speaker and clinical review.
+- Speech output depends on the voices installed in the user's browser.
+- Facility names, numbers and hours are placeholders; the emergency number must
+  be verified locally.
+- No PWA/offline shell, SMS/WhatsApp productisation, rate limiting, clinical
+  governance or DPIA yet.
+- No field pilot, baseline or measured impact yet.
 
 ## UNICEF FemTech
 
 The strongest fit is **Pillar 2: informed, safe and accessible reproductive
-health**. See [`docs/UNICEF_FEMTECH_FIT.md`](docs/UNICEF_FEMTECH_FIT.md).
+health**, with adjacent value in maternal/newborn care and mental wellbeing.
+
+- **Application pack** (draft answers, budget, 12-month plan, demo script):
+  [`docs/UNICEF_FEMTECH_APPLICATION.md`](docs/UNICEF_FEMTECH_APPLICATION.md)
+- **Fit assessment and readiness snapshot:**
+  [`docs/UNICEF_FEMTECH_FIT.md`](docs/UNICEF_FEMTECH_FIT.md)
+
+Before submitting: confirm legal entity/CAC and women-led status, rotate exposed
+keys, purge history, publish the repo, replace placeholder facilities, complete
+human translation review and record the demo.
 
 ## Contributing
 

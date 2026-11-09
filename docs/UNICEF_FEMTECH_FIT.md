@@ -2,7 +2,10 @@
 
 Source: <https://www.unicef.org/innovation/FemTechCall>
 Reviewed: 9 November 2026
-**Application deadline: 11 November 2026 — about 2 days away.**
+**Application deadline: 11 November 2026**
+
+The full application pack, draft answers, budget and demo script are in
+[`UNICEF_FEMTECH_APPLICATION.md`](UNICEF_FEMTECH_APPLICATION.md).
 
 ## What the call offers
 
@@ -14,77 +17,76 @@ Reviewed: 9 November 2026
 
 ## Hard eligibility checks
 
-| Requirement | Lafia status | Action needed |
+| Requirement | Lafia status | Action before submitting |
 | --- | --- | --- |
-| Registered in a UNICEF programme country | Likely yes if the company is registered in Nigeria. | Confirm CAC registration and country of incorporation. |
-| Functional prototype | **Yes** — working chat app with document upload, WHO knowledge base, streaming answers and citations. | Record a 2-minute demo and deploy on HTTPS. |
-| Committed to open-source licensing and principles | **Yes — MIT `LICENSE` added.** | Publish the repository publicly and add contribution/security docs. |
-| Uses frontier technology (AI/ML/data science) | **Yes** — retrieval-augmented generation over uploaded documents plus a WHO knowledge base. | Explain the architecture and the model/hosting choices. |
-| Focus on girls' and women's health | Partly — maternal/newborn, adolescent and sexual health, and mental health topics are included. | Reposition the product explicitly around women's and girls' health rather than general health. |
-| Safety-by-design (privacy, consent, user risk) | **Strong prototype.** Required consent, private-by-default chats, device-only saving, delete-my-chats, Quick exit, local-only location, placeholder facilities and clear disclaimers. Supabase auth scaffold is not mounted. | Add per-user isolation if accounts are introduced; complete the Phase 1 items in `AUTH_AND_PRIVACY.md` before real-user deployment. |
+| Registered in a UNICEF programme country | `[TO CONFIRM]` — Nigeria is a programme country; confirm legal entity and CAC. | Provide registration details. |
+| Functional prototype | **Yes** — local build with responsive UI, WHO runtime retrieval, citations, privacy controls and tests. | Deploy on HTTPS and record a demo. |
+| Committed to open-source licensing and principles | **Yes in the repository** — MIT code, CC BY 4.0 docs/design, NOTICE for WHO. | Rotate secrets, purge history, make the repo public. |
+| Uses frontier technology | **Yes** — generative AI + RAG + data science. | Explain architecture and model hosting. |
+| Focus on girls' and women's health | **Yes** — maternal/newborn, contraception, menstrual health, adolescent and mental-health topics; women-first onboarding. | Keep the application focused on women and girls, not general health. |
+| Safety-by-design | **Strong prototype** — required consent, no account, chats off by default, local-only saving, delete, Quick exit, local-only location, disclaimers. | Add DPIA, clinical governance and verified facility data before a pilot. |
 
 ## Fit against the three pillars
 
 ### Pillar 1 — Healthcare access for women and girls
-**Fit: medium-high.** Lafia already carries WHO guidance on antenatal care, danger signs in pregnancy, postnatal care, immunization and newborn health. It can support continuity of care and CHW workflows.
+**Fit: medium-high.** WHO maternal/newborn, pregnancy danger-sign,
+contraception and newborn content; Find care and CHW call-back concepts.
 
-**Gap:** it is an information assistant, not a point-of-care diagnostic or supply-planning tool. Do not overclaim this pillar.
+**Gap:** it is an information and navigation tool, not a diagnostic, supply-planning
+or point-of-care device. Do not overclaim this pillar.
 
 ### Pillar 2 — Informed, safe and accessible reproductive health
-**Fit: strongest.** The call explicitly asks for:
+**Fit: strongest.** The call asks for *“AI-powered accessible platforms delivering
+personalized reproductive health information and counselling in underserved
+languages, especially for low-literacy and low-bandwidth environments.”*
 
-> "AI-powered accessible platforms delivering personalized reproductive health information and counselling in underserved languages, especially for low-literacy and low-bandwidth environments."
+Lafia now has:
 
-Lafia is close to this: cited answers, a curated WHO corpus, a browser chat UI, and existing SMS/WhatsApp integration paths in the codebase. This is the best positioning.
+- six-language UI: English, Kiswahili, Luganda, Acholi, Ateso, Lusoga;
+- language-aware model prompting;
+- voice input, and Listen output when the browser has a matching voice;
+- cited WHO and document sources;
+- a consent-first, no-account, private-by-default flow;
+- Quick exit, delete-my-chats and local-only saving.
 
-**Gaps:** English-only, text-only, no local-language or voice output, no offline/low-bandwidth mode, no consent/privacy controls.
+**Remaining gaps:** human review of low-resource translations, PWA/offline mode,
+SMS/WhatsApp productisation, and measured comprehension in the field.
 
 ### Pillar 3 — Mental wellbeing, safety and protection
-**Fit: medium.** WHO mental-health and adolescent-health topics are included, but there is no screening, safeguarding or GBV referral workflow.
+**Fit: medium.** Mental-health and adolescent-health topics and a private access
+path. There is no screening, GBV referral or safeguarding workflow yet.
 
-## Overall readiness score
+## Readiness snapshot
 
-| Dimension | Score |
-| --- | --- |
-| Technology / prototype | 8/10 |
-| Women's and girls' health focus | 6/10 |
-| Low-resource and low-bandwidth readiness | 4/10 |
-| Privacy, consent and safety-by-design | 5/10 |
-| Open source and documentation | 7/10 |
-| Impact measurement | 2/10 |
+| Dimension | Score | Note |
+| --- | --- | --- |
+| Technology / prototype | 8/10 | Working, tested and documented. |
+| Women's and girls' health focus | 8/10 | Women-first copy, topics and flow. |
+| Low-resource / low-bandwidth readiness | 5/10 | Responsive browser UI; no PWA/offline or SMS yet. |
+| Privacy, consent and safety-by-design | 8/10 | Strong prototype; DPIA and governance remain. |
+| Open source and documentation | 8/10 | Licences, docs, tests and CI; public release pending. |
+| Impact measurement | 2/10 | No baseline or field data yet. |
 
-**Current overall: roughly 6/10 — a credible prototype with open-source and auth foundations, not yet a competitive FemTech application.**
-
-With a focused 2-week sprint on privacy, local languages and positioning, this can realistically reach **7.5–8/10**.
-
-## Recommended application positioning
-
-> **Lafia Chat AI is a privacy-first, multilingual sexual and reproductive health companion for adolescent girls and women in low-bandwidth Nigerian communities. It turns trusted WHO guidance and locally approved materials into cited, conversational answers in local languages, and connects users to human care through WhatsApp and SMS.**
-
-Do not lead with "general health chatbot". Lead with:
-
-- adolescent girls and women;
-- trusted, cited SRH and maternal-health information;
-- Hausa, Yoruba, Igbo, Nigerian Pidgin and English;
-- low-literacy and low-bandwidth design;
-- privacy and consent by default;
-- a bridge to CHWs and facilities, not a replacement for them.
+**Current overall: roughly 6.5/10 — a credible, well-documented prototype.**
+With human-reviewed translations, a public repo, HTTPS deployment, verified
+facilities and a small pilot, it can reach **8/10**.
 
 ## Highest-impact work before submitting
 
-1. **Publish the repository** with the MIT `LICENSE` and `CONTRIBUTING.md` (licence already added).
-2. **Finish auth**: add phone OTP, per-user document isolation and retention controls (Supabase scaffold is in place).
-3. **Add one Nigerian language** end-to-end (Hausa or Nigerian Pidgin) and voice input/output for low literacy.
-4. **Add a PWA/offline shell and SMS/WhatsApp fallback** for low bandwidth.
-5. **Add red-flag triage and a human referral path** with local emergency numbers.
-6. **Add basic impact metrics**: questions answered, sources cited, referrals triggered, language split, user satisfaction.
-7. **Write a one-page clinical governance note**: who reviews content, how WHO/local guidance is approved, how incidents are handled.
-8. **Deploy on HTTPS** with a real domain and record a demo video.
+1. Confirm legal entity, country, CAC and women-led/under-35 status.
+2. Rotate the exposed keys and purge Git history (`docs/SECRETS_AUDIT.md`).
+3. Publish the repository and deploy on HTTPS.
+4. Replace placeholder facilities and the emergency number.
+5. Human-review Acholi, Ateso and Lusoga strings and key health terms.
+6. Record the 2–3 minute demo in `UNICEF_FEMTECH_APPLICATION.md`.
+7. Name a clinical adviser and safeguarding contact.
+8. Finalise the proposed budget and 12-month milestones.
 
 ## Information still needed from the team
 
-- Country of company registration and CAC number.
-- Whether the company is women-led or has a founder under 35 (strongly encouraged).
-- Which local languages and geographies to target first.
-- Confirm the MIT / CC BY 4.0 split in `LICENSING.md` is acceptable to the company.
-- Whether the model can be hosted in-country or must use a third-party API.
+- Country of registration and CAC number.
+- Whether the company is women-led or has a founder under 35.
+- Initial pilot geography, languages and CHW partners.
+- Confirmation of the MIT / CC BY 4.0 split.
+- Model hosting choice and data-processing terms.
+- Clinical adviser and safeguarding contact.
