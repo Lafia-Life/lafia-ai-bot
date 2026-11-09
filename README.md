@@ -194,20 +194,6 @@ prompting, no server answer cache, and privacy-related ignore rules.
   governance or DPIA yet.
 - No field pilot, baseline or measured impact yet.
 
-## UNICEF FemTech
-
-The strongest fit is **Pillar 2: informed, safe and accessible reproductive
-health**, with adjacent value in maternal/newborn care and mental wellbeing.
-
-- **Application pack** (application answers, budget, 12-month plan, demo script):
-  [`docs/UNICEF_FEMTECH_APPLICATION.md`](docs/UNICEF_FEMTECH_APPLICATION.md)
-- **Fit assessment and readiness snapshot:**
-  [`docs/UNICEF_FEMTECH_FIT.md`](docs/UNICEF_FEMTECH_FIT.md)
-
-The application pack, fit assessment and working prototype are public and ready
-for review. Clinical validation and field impact will be established through the
-proposed 12-month programme.
-
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
