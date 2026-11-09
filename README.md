@@ -69,7 +69,7 @@ One codebase, three screens, responsive from 390px phones to desktop.
 | Answers | Working: runtime WHO retrieval, citations, language-aware prompting |
 | Voice | Working in supported browsers; Listen hidden when no matching voice exists |
 | Privacy | Working: consent, no account, chats off by default, local-only saving, delete, Quick exit, local-only location |
-| Open source | Clean public repo live; old repo deleted; protections enabled. Provider-key rotation pending. |
+| Open source | Clean public repository with MIT code, CC BY 4.0 docs, CodeQL, secret scanning and push protection. |
 | Clinical/field validation | Not yet done |
 | Impact measurement | Not yet done |
 
@@ -199,14 +199,14 @@ prompting, no server answer cache, and privacy-related ignore rules.
 The strongest fit is **Pillar 2: informed, safe and accessible reproductive
 health**, with adjacent value in maternal/newborn care and mental wellbeing.
 
-- **Application pack** (draft answers, budget, 12-month plan, demo script):
+- **Application pack** (application answers, budget, 12-month plan, demo script):
   [`docs/UNICEF_FEMTECH_APPLICATION.md`](docs/UNICEF_FEMTECH_APPLICATION.md)
 - **Fit assessment and readiness snapshot:**
   [`docs/UNICEF_FEMTECH_FIT.md`](docs/UNICEF_FEMTECH_FIT.md)
 
-Before submitting: confirm legal entity/CAC and women-led status, rotate the
-exposed provider keys, replace placeholder facilities, complete human
-translation review and record the demo.
+The application pack, fit assessment and working prototype are public and ready
+for review. Clinical validation and field impact will be established through the
+proposed 12-month programme.
 
 ## Contributing
 
