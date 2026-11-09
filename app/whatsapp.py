@@ -90,7 +90,13 @@ user_moodle_data = {}
 # Disable SSL warnings for Moodle
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 BASE_URL = os.getenv("BASE_URL")
-twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+twilio_client = (
+    Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN
+    else None
+)
 BLOCKING_MAX_WORKERS = int(os.getenv("WHATSAPP_BLOCKING_MAX_WORKERS", "100"))
 BLOCKING_EXECUTOR = ThreadPoolExecutor(max_workers=BLOCKING_MAX_WORKERS)
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")

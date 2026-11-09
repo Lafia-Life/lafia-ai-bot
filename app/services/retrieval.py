@@ -1,6 +1,4 @@
 import json
-from collections import OrderedDict
-from threading import Lock
 from typing import Generator, Iterable, List, Optional, Tuple
 
 from fastapi.encoders import jsonable_encoder
@@ -12,37 +10,21 @@ from app.services.embeddings import embed_query
 from app.services.vectorstore import get_collection, query_collection
 
 
-class AnswerCache:
-    def __init__(self, max_items: int = 32) -> None:
-        self.max_items = max_items
-        self._entries: "OrderedDict[str, dict]" = OrderedDict()
-        self._lock = Lock()
+LANGUAGE_NAMES = {
+    "en": "English",
+    "sw": "Kiswahili",
+    "lg": "Luganda",
+    "ach": "Acholi",
+    "teo": "Ateso",
+    "xog": "Lusoga",
+}
 
-    def get(self, key: str) -> Optional[dict]:
-        with self._lock:
-            if key not in self._entries:
-                return None
-            value = self._entries.pop(key)
-            self._entries[key] = value
-            return value
-
-    def set(self, key: str, value: dict) -> None:
-        with self._lock:
-            if key in self._entries:
-                self._entries.pop(key)
-            self._entries[key] = value
-            while len(self._entries) > self.max_items:
-                self._entries.popitem(last=False)
-
-
-def _normalize_question(question: str) -> str:
-    return question.strip().lower()
-
-
-_answer_cache = AnswerCache()
-
-_NO_CONTEXT_MESSAGE = "I could not find the answer in the uploaded documents."
-_RETRIEVAL_CANDIDATES = 24
+_NO_CONTEXT_MESSAGE = (
+    "I could not find that in the uploaded documents or the WHO knowledge base. "
+    "Try rephrasing your question, uploading a relevant document from the Knowledge Base, "
+    "or ask about a general health topic such as malaria, immunization, maternal health or TB."
+)
+_RETRIEVAL_CANDIDATES = 30
 
 
 def _retrieval_error_message(exc: Exception) -> str:
@@ -65,7 +47,18 @@ def _fetch_retrieval_results(collection, payload: ChatRequest) -> List[dict]:
         embedding=embedding,
         n_results=_RETRIEVAL_CANDIDATES,
     )
-    return _filter_results(raw_results, payload, limit=4)
+    filtered = _filter_results(raw_results, payload, limit=6)
+
+    # The lightweight hash back-end produces broad distances. Keep only passages
+    # that are close to the best match so irrelevant sources are not cited.
+    if filtered and get_settings().embedding_backend == "hash":
+        best = min(float(item.get("distance", 0.0)) for item in filtered)
+        cutoff = best * 1.16
+        filtered = [
+            item for item in filtered if float(item.get("distance", 0.0)) <= cutoff
+        ][:5]
+
+    return filtered
 
 
 def _coerce_text(value) -> str:
@@ -118,7 +111,7 @@ def _format_context(results: List[dict]) -> str:
         text = item["text"]
         source_type = metadata.get("source_type", "pdf")
         location: str
-        if source_type == "web":
+        if source_type in {"web", "who"}:
             location = f"section {metadata.get('page_start', 1)}"
         else:
             location = f"pages {metadata.get('page_start', 1)}-{metadata.get('page_end', metadata.get('page_start', 1))}"
@@ -129,25 +122,55 @@ def _format_context(results: List[dict]) -> str:
     return "\n\n".join(context_blocks)
 
 
-def _build_prompt(question: str, context: str, context_prompt: Optional[str] = None) -> List[dict]:
+def _build_prompt(
+    question: str,
+    context: str,
+    context_prompt: Optional[str] = None,
+    history: Optional[List] = None,
+    language: Optional[str] = None,
+) -> List[dict]:
     system = (
-        "You are a helpful assistant answering questions about a collection of course documents. "
-        "Use only the provided context to answer. Quote relevant portions when useful. "
-        "List citations in square brackets referencing the source filename and page numbers, "
-        "for example [Report.pdf p.3]. If the answer cannot be derived from the context, "
-        "respond with 'I could not find the answer in the uploaded documents.'"
+        "You are Lafia Chat AI, a friendly and trustworthy health information assistant. "
+        "You answer questions using ONLY the provided context, which comes from documents the "
+        "user uploaded and from official WHO (World Health Organization) health guidance. "
+        "Be warm, clear and practical. Prefer short paragraphs and bullet points. "
+        "Quote relevant facts when useful and cite each source in square brackets using the "
+        "source filename and section/page, for example [WHO - Malaria section 2] or "
+        "[Report.pdf p.3]. "
+        "If the context does not contain the answer, say you could not find it in the available "
+        "sources and suggest what document or WHO topic could help. Never invent facts, numbers "
+        "or citations. "
+        "You are not a doctor: do not diagnose, prescribe, or give personalised dosage advice. "
+        "For red-flag or emergency symptoms, clearly advise the user to contact a qualified "
+        "health worker or go to the nearest health facility immediately. "
+        "Use the conversation history to understand follow-up questions."
     )
+    language_name = LANGUAGE_NAMES.get((language or "en").strip().lower(), "English")
+    if language_name != "English":
+        system += (
+            f"\nReply in {language_name}. Write naturally and clearly for a low-literacy "
+            f"reader. If a medical term has no reliable translation, keep the English term "
+            f"in parentheses. Do not switch to English for the whole answer."
+        )
     if context_prompt and context_prompt.strip():
         system = system + "\n\nAdditional instructions:\n" + context_prompt.strip()
-    return [
-        {"role": "system", "content": system},
+
+    messages: List[dict] = [{"role": "system", "content": system}]
+    for turn in history or []:
+        role = str(getattr(turn, "role", "")).strip().lower()
+        content = str(getattr(turn, "content", "")).strip()
+        if role in {"user", "assistant"} and content:
+            messages.append({"role": role, "content": content[:4000]})
+
+    messages.append(
         {
             "role": "user",
             "content": (
                 "Context:\n" + context + "\n\n" + "Question: " + question
             ),
-        },
-    ]
+        }
+    )
+    return messages
 
 
 def _normalize_str_list(values: Optional[List[str]]) -> set[str]:
@@ -162,7 +185,7 @@ def _normalize_course_list(values: Optional[List[str]]) -> set[str]:
     return {str(item).strip() for item in values if str(item).strip()}
 
 
-def _filter_results(raw_results: List[dict], payload: ChatRequest, limit: int = 4) -> List[dict]:
+def _filter_results(raw_results: List[dict], payload: ChatRequest, limit: int = 6) -> List[dict]:
     allowed_source_types = _normalize_str_list(payload.allowed_source_types)
     allowed_course_ids = _normalize_course_list(payload.allowed_course_ids)
     include_global_docs = bool(payload.include_global_docs)
@@ -197,8 +220,16 @@ def _filter_results(raw_results: List[dict], payload: ChatRequest, limit: int = 
 
 def _to_citations(results: List[dict]) -> List[Citation]:
     citations: List[Citation] = []
+    seen: set[tuple[str, int]] = set()
     for item in results:
         metadata = item["metadata"]
+        citation_key = (
+            str(metadata.get("document_id", "")),
+            int(metadata.get("page_start", 0) or 0),
+        )
+        if citation_key in seen:
+            continue
+        seen.add(citation_key)
         distance = float(item.get("distance", 0.0))
         similarity = max(0.0, 1.0 - distance)
         excerpt = item.get("text", "").strip()
@@ -244,7 +275,7 @@ def answer_question(payload: ChatRequest) -> ChatResponse:
         )
 
     context = _format_context(raw_results)
-    messages = _build_prompt(payload.question, context, payload.context_prompt)
+    messages = _build_prompt(payload.question, context, payload.context_prompt, payload.history, payload.language)
     chat_completion = client.chat.completions.create(
         model=settings.chat_model,
         messages=messages,
@@ -279,7 +310,7 @@ async def answer_question_async(payload: ChatRequest) -> ChatResponse:
         )
 
     context = _format_context(raw_results)
-    messages = _build_prompt(payload.question, context, payload.context_prompt)
+    messages = _build_prompt(payload.question, context, payload.context_prompt, payload.history, payload.language)
     chat_completion = await client.chat.completions.create(
         model=settings.chat_model,
         messages=messages,
@@ -299,35 +330,6 @@ def _encode_event(payload: dict) -> bytes:
 
 
 def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
-    question_key = _normalize_question(payload.question)
-    cached = _answer_cache.get(question_key)
-
-    if cached is not None:
-        citations = cached.get("citations", [])
-        if citations:
-            yield _encode_event({"type": "references", "citations": citations})
-
-        answer_chunks: Tuple[str, ...] = tuple(cached.get("answer_chunks", ()))
-        emitted_delta = False
-        for chunk in answer_chunks:
-            if not chunk:
-                continue
-            emitted_delta = True
-            yield _encode_event({"type": "delta", "content": chunk})
-
-        cached_answer: str = cached.get("answer", "")
-        if not emitted_delta and cached_answer:
-            yield _encode_event({"type": "delta", "content": cached_answer})
-
-        yield _encode_event(
-            {
-                "type": "done",
-                "answer": cached_answer,
-                "citations": citations,
-            }
-        )
-        return
-
     settings: Settings = get_settings()
     client = get_openai_client(settings)
     collection = get_collection()
@@ -339,14 +341,6 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
         return
 
     if not raw_results:
-        _answer_cache.set(
-            question_key,
-            {
-                "answer": _NO_CONTEXT_MESSAGE,
-                "answer_chunks": (_NO_CONTEXT_MESSAGE,),
-                "citations": [],
-            },
-        )
         yield _encode_event(
             {
                 "type": "done",
@@ -361,7 +355,7 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
         yield _encode_event({"type": "references", "citations": citations})
 
     context = _format_context(raw_results)
-    messages = _build_prompt(payload.question, context, payload.context_prompt)
+    messages = _build_prompt(payload.question, context, payload.context_prompt, payload.history, payload.language)
 
     answer_parts: List[str] = []
 
@@ -395,13 +389,4 @@ def stream_answer(payload: ChatRequest) -> Generator[bytes, None, None]:
             "answer": answer_text,
             "citations": citations,
         }
-    )
-
-    _answer_cache.set(
-        question_key,
-        {
-            "answer": answer_text,
-            "answer_chunks": tuple(answer_parts),
-            "citations": citations,
-        },
     )

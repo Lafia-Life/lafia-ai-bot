@@ -104,9 +104,16 @@ class VideoUploadRequest(BaseModel):
 # -----------------------------
 # 💬 Chat Models
 # -----------------------------
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     question: str
     conversation_id: Optional[str] = None
+    history: Optional[List[ChatMessage]] = None
+    language: Optional[str] = "en"
     context_prompt: Optional[str] = None
     allowed_course_ids: Optional[List[str]] = None
     allowed_source_types: Optional[List[str]] = None
@@ -142,6 +149,44 @@ class ChatResponse(BaseModel):
 
 
 # -----------------------------
+# 🔐 Authentication (Supabase)
+# -----------------------------
+class AuthSignupRequest(BaseModel):
+    email: str
+    password: str
+    full_name: Optional[str] = None
+    consent: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        email = str(value or "").strip().lower()
+        if "@" not in email or "." not in email.split("@")[-1]:
+            raise ValueError("Enter a valid email address.")
+        return email
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value or "") < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        return value
+
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        email = str(value or "").strip().lower()
+        if "@" not in email:
+            raise ValueError("Enter a valid email address.")
+        return email
+
+
+# -----------------------------
 # 🌐 Web Scraping
 # -----------------------------
 class ScrapeRequest(BaseModel):
@@ -157,6 +202,9 @@ class SMSWebhookRequest(BaseModel):
     """Incoming SMS webhook from Africa's Talking"""
     to: str  # Your shortcode/number
     from_: str = Field(alias="from")  # Sender's phone number
+    text: str  # SMS message content
+    date: str  # Timestamp
+    id: str  # Message # Sender's phone number
     text: str  # SMS message content
     date: str  # Timestamp
     id: str  # Message ID

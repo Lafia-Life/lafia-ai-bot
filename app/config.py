@@ -13,7 +13,8 @@ load_dotenv()
 
 def _resolve_openai_key() -> Optional[str]:
     return (
-        os.getenv("OPENAI_API_KEY")
+        os.getenv("LLM_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
         or os.getenv("DEEPSEEK_API_KEY")
         or os.getenv("DEEPSEEK_KEY")
         or None
@@ -22,7 +23,8 @@ def _resolve_openai_key() -> Optional[str]:
 
 def _resolve_openai_base_url() -> Optional[str]:
     return (
-        os.getenv("OPENAI_BASE_URL")
+        os.getenv("LLM_BASE_URL")
+        or os.getenv("OPENAI_BASE_URL")
         or os.getenv("DEEPSEEK_BASE_URL")
         or os.getenv("DEEPSEEK_API_BASE")
         or None
@@ -39,7 +41,10 @@ def _env_flag(name: str, default: bool = False) -> bool:
 class Settings(BaseModel):
     openai_api_key: Optional[str] = Field(default_factory=_resolve_openai_key)
     openai_base_url: Optional[str] = Field(default_factory=_resolve_openai_base_url)
-    chat_model: str = Field(default_factory=lambda: os.getenv("CHAT_MODEL", "gpt-4o-mini"))
+    llm_provider: str = Field(default_factory=lambda: os.getenv("LLM_PROVIDER", "openai-compatible"))
+    chat_model: str = Field(
+        default_factory=lambda: os.getenv("LLM_MODEL") or os.getenv("CHAT_MODEL") or "gpt-4o-mini"
+    )
     embedding_backend: str = Field(
         default_factory=lambda: os.getenv("EMBEDDING_BACKEND", "auto")
     )
@@ -62,7 +67,17 @@ class Settings(BaseModel):
     scraper_timeout: float = Field(default_factory=lambda: float(os.getenv("SCRAPER_TIMEOUT", "20")))
     scraper_proxy_url: Optional[str] = Field(default_factory=lambda: os.getenv("SCRAPER_PROXY_URL"))
     scraper_enable_http2: bool = Field(default_factory=lambda: _env_flag("SCRAPER_HTTP2", False))
+    who_sync_on_startup: bool = Field(default_factory=lambda: _env_flag("WHO_SYNC_ON_STARTUP", True))
     
+    # Supabase authentication (placeholders are replaced in production)
+    supabase_url: Optional[str] = Field(default_factory=lambda: os.getenv("SUPABASE_URL"))
+    supabase_anon_key: Optional[str] = Field(default_factory=lambda: os.getenv("SUPABASE_ANON_KEY"))
+    supabase_service_role_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    )
+    auth_required: bool = Field(default_factory=lambda: _env_flag("AUTH_REQUIRED", False))
+    auth_cookie_secure: bool = Field(default_factory=lambda: _env_flag("AUTH_COOKIE_SECURE", False))
+
     # SMS Configuration for Africa's Talking (Uganda)
     africas_talking_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("AFRICAS_TALKING_API_KEY"))
     africas_talking_username: str = Field(default_factory=lambda: os.getenv("AFRICAS_TALKING_USERNAME", "sandbox"))
@@ -76,10 +91,10 @@ class Settings(BaseModel):
 def get_settings() -> Settings:
     settings = Settings()
     backend = settings.embedding_backend.lower()
-    if backend not in {"openai", "local", "auto"}:
+    if backend not in {"openai", "local", "auto", "hash"}:
         backend = "auto"
     if backend == "auto":
-        backend = "openai" if settings.openai_api_key else "local"
+        backend = "hash"
     settings.embedding_backend = backend
     settings.uploads_path.mkdir(parents=True, exist_ok=True)
     settings.chroma_path.mkdir(parents=True, exist_ok=True)

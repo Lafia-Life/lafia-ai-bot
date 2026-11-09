@@ -1,6 +1,6 @@
 from pathlib import Path
 import fastapi
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile,Form,Query
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile,Form,Query,Response
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -10,7 +10,9 @@ import os
 from datetime import datetime
 from typing import Optional,List
 from app.config import get_openai_api_key, get_settings
-from app.schemas import VideoSummary,VideoUploadResponse, VideoType, ChatRequest, DocumentSummary, ScrapeRequest, UploadResponse, Course, CourseCreate, CourseUpdate, SMSResponse
+from app.schemas import VideoSummary,VideoUploadResponse, VideoType, ChatRequest, DocumentSummary, ScrapeRequest, UploadResponse, Course, CourseCreate, CourseUpdate, SMSResponse, AuthSignupRequest, AuthLoginRequest
+from app.services import supabase_auth
+from app.services.supabase_auth import SupabaseAuthError
 from app.services.document_store import DocumentStore
 from app.services.video_store import VideoStore
 from app.services.ingestion import ingest_document, ingest_web_page
@@ -21,13 +23,35 @@ from app.services.sms_service import send_sms_response, parse_incoming_sms
 from starlette.requests import Request
 from app.services.video_store  import VideoStore
 from app.services.course_store import CourseStore
+from app.services.who_knowledge import (
+    SUGGESTED_QUESTIONS,
+    WHO_TOPICS,
+    sync_who_knowledge,
+    who_document_id,
+)
 from app.whatsapp import router as whatsapp_router
 
 
-
-
 course_store = CourseStore(Path("storage/data"))
-app = FastAPI(title="PDF Chat Assistant")
+app = FastAPI(
+    title="Lafia Chat AI",
+    description="Health answers grounded in your documents and WHO guidance.",
+)
+
+
+@app.on_event("startup")
+def seed_who_knowledge() -> None:
+    """Index bundled WHO topics once so chat works out of the box."""
+    if not get_settings().who_sync_on_startup:
+        return
+    try:
+        result = sync_who_knowledge(force=False)
+        print(
+            f"[Lafia] WHO runtime sync: {result['indexed']} indexed, "
+            f"{result['skipped']} skipped, {len(result.get('errors', []))} errors"
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Lafia] WHO knowledge seeding skipped: {exc}")
 # app.mount("/webhook", whatsapp_app)
 settings = get_settings()
 document_store = DocumentStore(settings.chroma_path)
@@ -40,7 +64,48 @@ app.include_router(
 )
 # app.mount("/webhook", whatsapp_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+if Path("data").exists():
+    app.mount("/data", StaticFiles(directory="data"), name="data")
 templates = Jinja2Templates(directory="templates")
+
+AUTH_ACCESS_COOKIE = "lafia_access_token"
+AUTH_REFRESH_COOKIE = "lafia_refresh_token"
+REFRESH_MAX_AGE = 60 * 60 * 24 * 30
+
+
+def _set_auth_cookies(response: Response, session: dict) -> None:
+    access_token = session.get("access_token")
+    refresh_token = session.get("refresh_token")
+    secure = get_settings().auth_cookie_secure
+    if access_token:
+        response.set_cookie(
+            AUTH_ACCESS_COOKIE,
+            access_token,
+            max_age=int(session.get("expires_in") or 3600),
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+        )
+    if refresh_token:
+        response.set_cookie(
+            AUTH_REFRESH_COOKIE,
+            refresh_token,
+            max_age=REFRESH_MAX_AGE,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+        )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(AUTH_ACCESS_COOKIE, path="/")
+    response.delete_cookie(AUTH_REFRESH_COOKIE, path="/")
+
+
+def _auth_http_error(exc: SupabaseAuthError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.message)
 
 
 def get_document_store() -> DocumentStore:
@@ -92,6 +157,152 @@ def _delete_document_by_id(document_id: str, store: DocumentStore) -> DocumentSu
 @app.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("chat.html", {"request": request})
+
+
+def _who_status() -> dict:
+    store = DocumentStore(settings.chroma_path)
+    indexed = [doc for doc in store.list() if doc.source_type == "who"]
+    return {
+        "indexed": len(indexed),
+        "total_topics": len(WHO_TOPICS),
+        "ready": len(indexed) > 0,
+        "topics": [{"id": t["id"], "title": t["title"], "url": t["url"]} for t in WHO_TOPICS],
+    }
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {
+        "status": "ok",
+        "app": "Lafia Chat AI",
+        "chat_model": settings.chat_model,
+        "llm_provider": settings.llm_provider,
+        "chat_configured": bool(get_openai_api_key()),
+        "embedding_backend": settings.embedding_backend,
+        "auth_configured": supabase_auth.is_configured(),
+        "auth_required": settings.auth_required,
+    }
+
+
+@app.get("/api/auth/config")
+def auth_config() -> dict:
+    return supabase_auth.public_config()
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(payload: AuthSignupRequest, response: Response) -> dict:
+    if not payload.consent:
+        raise HTTPException(
+            status_code=400,
+            detail="Please accept the privacy notice before creating an account.",
+        )
+    try:
+        result = await supabase_auth.sign_up(
+            payload.email, payload.password, payload.full_name
+        )
+    except SupabaseAuthError as exc:
+        raise _auth_http_error(exc) from exc
+    session = result.get("session") or {}
+    if session.get("access_token"):
+        _set_auth_cookies(response, session)
+    return {
+        "ok": True,
+        "user": result.get("user"),
+        "needs_confirmation": result.get("needs_confirmation", False),
+        "message": (
+            "Account created. Check your email to confirm your address."
+            if result.get("needs_confirmation")
+            else "Account created. Welcome to Lafia."
+        ),
+    }
+
+
+@app.post("/api/auth/login")
+async def auth_login(payload: AuthLoginRequest, response: Response) -> dict:
+    try:
+        result = await supabase_auth.sign_in(payload.email, payload.password)
+    except SupabaseAuthError as exc:
+        raise _auth_http_error(exc) from exc
+    session = result.get("session") or {}
+    if session.get("access_token"):
+        _set_auth_cookies(response, session)
+    return {"ok": True, "user": result.get("user"), "message": "Signed in."}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response) -> dict:
+    access_token = request.cookies.get(AUTH_ACCESS_COOKIE)
+    await supabase_auth.sign_out(access_token)
+    _clear_auth_cookies(response)
+    return {"ok": True, "message": "Signed out."}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request, response: Response) -> dict:
+    config = supabase_auth.public_config()
+    user = None
+    access_token = request.cookies.get(AUTH_ACCESS_COOKIE)
+    refresh_token = request.cookies.get(AUTH_REFRESH_COOKIE)
+
+    if access_token and config["enabled"]:
+        try:
+            user = await supabase_auth.get_user(access_token)
+        except SupabaseAuthError:
+            user = None
+
+    if user is None and refresh_token and config["enabled"]:
+        try:
+            refreshed = await supabase_auth.refresh_session(refresh_token)
+            session = refreshed.get("session") or {}
+            if session.get("access_token"):
+                _set_auth_cookies(response, session)
+            user = refreshed.get("user")
+        except SupabaseAuthError:
+            _clear_auth_cookies(response)
+
+    return {
+        **config,
+        "authenticated": bool(user),
+        "user": user,
+    }
+
+
+@app.get("/api/bootstrap")
+def bootstrap() -> dict:
+    """Everything the chat UI needs on first paint."""
+    store = DocumentStore(settings.chroma_path)
+    documents = store.list()
+    return {
+        "app": "Lafia Chat AI",
+        "chat_configured": bool(get_openai_api_key()),
+        "model": settings.chat_model,
+        "documents": [doc.model_dump() for doc in documents],
+        "who": _who_status(),
+        "suggestions": SUGGESTED_QUESTIONS,
+        "auth": supabase_auth.public_config(),
+    }
+
+
+@app.get("/api/who")
+def who_status() -> dict:
+    return _who_status()
+
+
+@app.post("/api/who/sync")
+def who_sync(force: bool = Query(False)) -> dict:
+    try:
+        result = sync_who_knowledge(force=force)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Could not sync WHO data: {exc}") from exc
+    return {"ok": True, **result, "status": _who_status()}
+
+
+@app.get("/api/who/{topic_id}")
+def who_topic(topic_id: str) -> dict:
+    for topic in WHO_TOPICS:
+        if topic["id"] == topic_id:
+            return topic
+    raise HTTPException(status_code=404, detail="WHO topic not found.")
 
 
 @app.get("/whatsapp")
@@ -159,15 +370,23 @@ def upload_document(
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    response = ingest_document(
-        upload_bytes=contents,
-        filename=file.filename,
-        content_type=file.content_type,
-        course_id=course_id,  # Pass course_id to your ingest function
-        moodle_cmid=moodle_cmid,
-        source_type_hint=source_type_hint,
-        external_ref=external_ref,
-    )
+    try:
+        response = ingest_document(
+            upload_bytes=contents,
+            filename=file.filename,
+            content_type=file.content_type,
+            course_id=course_id,
+            moodle_cmid=moodle_cmid,
+            source_type_hint=source_type_hint,
+            external_ref=external_ref,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read this file. Please check that it is a valid PDF, image or SCORM ZIP. ({exc})",
+        ) from exc
     return response
 
 
