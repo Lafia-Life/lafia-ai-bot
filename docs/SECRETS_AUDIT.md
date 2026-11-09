@@ -5,6 +5,31 @@ Scope: current working tree and local git history of this repository.
 
 No secret values are reproduced in this document.
 
+## Remediation performed on 9 November 2026
+
+- Backed up the pre-rewrite repository to a local bundle outside the repo.
+- Rewrote all local refs with `git filter-repo --replace-text`:
+  - DeepSeek key literals → `REDACTED_LLM_KEY`
+  - Africa's Talking key literals → `REDACTED_AFRICAS_TALKING_KEY`
+  - `+256…` / `256…` phone-like literals → `+000000000`
+- Force-pushed the rewritten `master` and `add_voice_feature` branches.
+- Verified that all current local and remote refs contain **0** matches for the
+  audited secret patterns.
+- Enabled GitHub **secret scanning**, **secret scanning push protection** and
+  **Dependabot security updates**.
+- GitHub secret scanning currently reports an open alert for the DeepSeek key.
+  It must stay open until the key is actually revoked.
+
+### Still required outside this repository
+
+1. Revoke and replace the DeepSeek key in the provider dashboard.
+2. Revoke and replace the Africa's Talking key in its dashboard.
+3. Update the local `.env` with the new values.
+4. Mark the GitHub secret-scanning alert as resolved **after** revocation.
+5. Old commit SHAs can remain reachable through GitHub's object cache even after
+   a force-push. Ask GitHub Support to purge unreachable commits, or delete and
+   recreate the repository if a completely clean public history is required.
+
 ## Findings
 
 ### 1. Africa's Talking API key — **high**
@@ -14,10 +39,10 @@ working tree and in history.
 
 - Fixed in the working tree: the script now reads
   `AFRICAS_TALKING_API_KEY` from the environment and exits if unset.
-- Still present in history: commits `c7d5101`, `64cc8b8` and `cb628bd`
-  contain the file with the key.
+- Removed from all current refs on 9 November 2026. Pre-rewrite commit SHAs
+  may remain reachable through GitHub's object cache.
 - **Action:** revoke the key in the Africa's Talking dashboard and create a new
-  one. Do not rely on removing it from the latest commit.
+  one. Do not rely on the history rewrite alone.
 
 ### 2. DeepSeek API key in `.env.example` — **high**
 
@@ -25,8 +50,10 @@ An early commit (`005becb`) committed a real-looking `sk-…` key in
 `.env.example`. The current `.env.example` is blank, but the key remains in git
 history.
 
-- **Action:** revoke/rotate that DeepSeek key.
-- If the key was reused anywhere else, rotate it there too.
+- Removed from all current refs on 9 November 2026. GitHub still shows an
+  open secret-scanning alert for it.
+- **Action:** revoke/rotate the DeepSeek key and then resolve the alert. If the
+  key was reused anywhere else, rotate it there too.
 
 ### 3. Local `.env` — **medium**
 
@@ -43,8 +70,9 @@ on disk in this workspace.
 numbers. They are replaced with `+000000000` in the working tree, but history
 still contains the originals.
 
-- **Action:** treat as personal data. Purge history before publishing or confirm
-  the numbers are non-personal test numbers.
+- Replaced with `+000000000` in the rewritten history.
+- **Action:** treat the original numbers as personal data; old commit SHAs may
+  still be cached by GitHub until purged.
 
 ### 5. Tracked local data and OS files — **low**
 
@@ -66,20 +94,14 @@ No Twilio, Google, GitHub or private-key material was found.
 
 ## Before making the repository public
 
+The repository is already public. The remaining steps are:
+
 1. Rotate the Africa's Talking and DeepSeek keys listed above.
-2. Purge the secrets and phone numbers from history. For example, with
-   `git filter-repo` and a private replacements file:
-
-   ```bash
-   # replacements.txt is local and must never be committed
-   git filter-repo --replace-text replacements.txt
-   ```
-
-   This rewrites every commit hash. Coordinate with all clones and force-push
-   only after the rewrite is verified.
-3. Re-run this audit on the rewritten history.
-4. Enable GitHub secret scanning and push protection.
-5. Keep `.env` local; commit only `.env.example`.
+2. Resolve the GitHub secret-scanning alert only after the key is revoked.
+3. Ask GitHub Support to purge old unreachable commits, or delete and recreate
+   the repository if a completely clean public object history is required.
+4. Keep `.env` local; commit only `.env.example`.
+5. Confirm CI remains green and secret scanning finds nothing in new pushes.
 
 ## Ongoing prevention
 

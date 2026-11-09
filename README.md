@@ -67,7 +67,7 @@ One codebase, three screens, responsive from 390px phones to desktop.
 | Answers | Working: runtime WHO retrieval, citations, language-aware prompting |
 | Voice | Working in supported browsers; Listen hidden when no matching voice exists |
 | Privacy | Working: consent, no account, chats off by default, local-only saving, delete, Quick exit, local-only location |
-| Open source | MIT + CC BY 4.0 files in place; public release pending secret rotation and history purge |
+| Open source | Public repo live; history rewritten and protections enabled. Provider-key rotation and old-SHA purge pending. |
 | Clinical/field validation | Not yet done |
 | Impact measurement | Not yet done |
 
@@ -202,9 +202,10 @@ health**, with adjacent value in maternal/newborn care and mental wellbeing.
 - **Fit assessment and readiness snapshot:**
   [`docs/UNICEF_FEMTECH_FIT.md`](docs/UNICEF_FEMTECH_FIT.md)
 
-Before submitting: confirm legal entity/CAC and women-led status, rotate exposed
-keys, purge history, publish the repo, replace placeholder facilities, complete
-human translation review and record the demo.
+Before submitting: confirm legal entity/CAC and women-led status, rotate the
+exposed provider keys, resolve the GitHub secret-scanning alert, purge old cached
+commit SHAs, replace placeholder facilities, complete human translation review
+and record the demo.
 
 ## Contributing
 

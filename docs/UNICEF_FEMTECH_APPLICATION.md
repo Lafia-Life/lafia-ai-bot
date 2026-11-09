@@ -5,8 +5,9 @@
 **Call:** UNICEF FemTech Ventures, second cohort
 **Deadline:** 11 November 2026
 **Prototype:** local working build, `http://localhost:8000`
-**Repository:** local Git repository; public release pending the security purge in
-`docs/SECRETS_AUDIT.md`
+**Repository:** <https://github.com/egesamichael/chatlearning> — public; secret
+history rewritten on 9 November 2026. Provider-key rotation and old-SHA cache
+purge are still required (see `docs/SECRETS_AUDIT.md`).
 **Contact:** `[TO CONFIRM]`
 
 > This document is an application working draft. Items marked `[TO CONFIRM]` or
@@ -159,7 +160,7 @@ Browser (phone or desktop)
 | --- | --- |
 | Registered in a UNICEF programme country | `[TO CONFIRM]` — Nigeria is a programme country; confirm entity registration. |
 | Functional prototype | **Yes** — working local build with tests. |
-| Open-source licensing and principles | **Yes in the repository** — MIT code and CC BY 4.0 docs/design. Public release pending secret purge and a visibility change. |
+| Open-source licensing and principles | **Yes** — public repository, MIT code and CC BY 4.0 docs/design. Secret history rewritten; provider-key rotation pending. |
 | Frontier technology | **Yes** — generative AI + RAG + data science. |
 | Safety-by-design | **Strong prototype** — consent, private-by-default chats, local-only saving, delete, Quick exit, local-only location, disclaimers. |
 | Women-led / founder under 35 | `[TO CONFIRM]` — strongly encouraged, not a hard requirement. |
@@ -227,17 +228,24 @@ Full detail and verification checks: `docs/SAFETY_AND_PRIVACY.md`.
 | WHO content | Not relicensed; fetched at runtime under WHO terms — `NOTICE` |
 | Split and attribution | `LICENSING.md` |
 
-### Before the repository is public
+### Public repository status
+
+The repository is public at
+<https://github.com/egesamichael/chatlearning>. On 9 November 2026 the history
+was rewritten, both active branches were force-pushed, and GitHub secret
+scanning, push protection and Dependabot updates were enabled.
+
+Remaining before the application:
 
 1. Rotate the Africa’s Talking and DeepSeek keys identified in
    `docs/SECRETS_AUDIT.md`.
-2. Purge secret-bearing commits and real-looking phone numbers from history.
-3. Re-run the audit on the rewritten history.
-4. Enable GitHub secret scanning and push protection.
-5. Publish the repository and add the URL to the application.
+2. Resolve the GitHub secret-scanning alert after revocation.
+3. Ask GitHub Support to purge old unreachable commits, or recreate the
+   repository if a completely clean object history is required.
+4. Keep `.env` local; commit only `.env.example`.
 
-The open-source commitment is real, but **the public release is a deliberate
-pre-submission task**, not something to claim as already done.
+The open-source commitment is real, but **key rotation is still an external
+provider action and must not be skipped**.
 
 ---
 

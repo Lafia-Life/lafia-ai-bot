@@ -21,7 +21,7 @@ The full application pack, draft answers, budget and demo script are in
 | --- | --- | --- |
 | Registered in a UNICEF programme country | `[TO CONFIRM]` — Nigeria is a programme country; confirm legal entity and CAC. | Provide registration details. |
 | Functional prototype | **Yes** — local build with responsive UI, WHO runtime retrieval, citations, privacy controls and tests. | Deploy on HTTPS and record a demo. |
-| Committed to open-source licensing and principles | **Yes in the repository** — MIT code, CC BY 4.0 docs/design, NOTICE for WHO. | Rotate secrets, purge history, make the repo public. |
+| Committed to open-source licensing and principles | **Yes** — public repository, MIT code, CC BY 4.0 docs/design, NOTICE for WHO. Secret history rewritten. | Rotate provider keys and purge old cached commit SHAs. |
 | Uses frontier technology | **Yes** — generative AI + RAG + data science. | Explain architecture and model hosting. |
 | Focus on girls' and women's health | **Yes** — maternal/newborn, contraception, menstrual health, adolescent and mental-health topics; women-first onboarding. | Keep the application focused on women and girls, not general health. |
 | Safety-by-design | **Strong prototype** — required consent, no account, chats off by default, local-only saving, delete, Quick exit, local-only location, disclaimers. | Add DPIA, clinical governance and verified facility data before a pilot. |
@@ -64,7 +64,7 @@ path. There is no screening, GBV referral or safeguarding workflow yet.
 | Women's and girls' health focus | 8/10 | Women-first copy, topics and flow. |
 | Low-resource / low-bandwidth readiness | 5/10 | Responsive browser UI; no PWA/offline or SMS yet. |
 | Privacy, consent and safety-by-design | 8/10 | Strong prototype; DPIA and governance remain. |
-| Open source and documentation | 8/10 | Licences, docs, tests and CI; public release pending. |
+| Open source and documentation | 9/10 | Public repo, licences, docs, tests and CI; key rotation pending. |
 | Impact measurement | 2/10 | No baseline or field data yet. |
 
 **Current overall: roughly 6.5/10 — a credible, well-documented prototype.**
@@ -74,8 +74,8 @@ facilities and a small pilot, it can reach **8/10**.
 ## Highest-impact work before submitting
 
 1. Confirm legal entity, country, CAC and women-led/under-35 status.
-2. Rotate the exposed keys and purge Git history (`docs/SECRETS_AUDIT.md`).
-3. Publish the repository and deploy on HTTPS.
+2. Rotate the exposed provider keys and purge old cached commit SHAs (`docs/SECRETS_AUDIT.md`).
+3. Deploy on HTTPS; the repository is already public.
 4. Replace placeholder facilities and the emergency number.
 5. Human-review Acholi, Ateso and Lusoga strings and key health terms.
 6. Record the 2–3 minute demo in `UNICEF_FEMTECH_APPLICATION.md`.
