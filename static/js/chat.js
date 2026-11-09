@@ -1,4 +1,4 @@
-/* Lafia Chat AI — responsive three-screen client */
+/* Lafia Chat AI — responsive workspace client */
 (function () {
   "use strict";
 
@@ -11,9 +11,7 @@
     { code: "xog", key: "language.xog", recognition: "xog-UG", speech: "xog" },
   ];
 
-  // Neutral site for Quick exit. location.replace means Back cannot return here.
   const QUICK_EXIT_URL = "https://www.google.com";
-
   const KEYS = {
     language: "lafia.language.v1",
     consent: "lafia.consent.v1",
@@ -47,7 +45,6 @@
 
   async function init() {
     cacheElements();
-    // Remove conversation keys from the old prototype; chats must be opt-in.
     ["lafia.conversations.v1", "lafia.current.v1", "lafia.messages.v1"].forEach((key) => {
       try {
         localStorage.removeItem(key);
@@ -62,26 +59,25 @@
     renderLanguageOptions();
     bindEvents();
     renderSaveToggles();
+    renderRecent();
     setupSpeechRecognition();
     setupSpeechSynthesis();
     loadFacilities();
 
     const consent = readJson(KEYS.consent, null);
-    if (consent && consent.accepted) {
-      openChat();
-    } else {
-      showScreen("consent");
-    }
+    if (consent && consent.accepted) openChat();
+    else showScreen("consent");
   }
 
   function cacheElements() {
     [
-      "screen-consent", "screen-chat", "screen-care",
-      "language-select", "chat-language", "consent-check", "continue-btn",
+      "screen-consent", "workspace", "screen-chat", "screen-care",
+      "sidebar", "sidebar-scrim", "consent-language", "language-select",
+      "consent-check", "continue-btn", "new-chat",
+      "nav-chat", "nav-care", "nav-knowledge", "recent-list",
       "messages", "welcome", "suggestions", "question", "chat-form",
-      "mic-btn", "send-btn", "sources-btn", "open-sources", "privacy-btn",
-      "quick-exit", "care-quick-exit", "find-care-btn", "care-back",
-      "sources-list", "sources-list-mobile", "privacy-sheet", "sources-sheet",
+      "mic-btn", "send-btn", "sources-btn", "sources-panel",
+      "sources-list", "sources-list-mobile", "sources-sheet",
       "source-sheet", "source-kind", "source-title", "source-meta",
       "source-excerpt", "source-actions", "facility-list", "location-btn",
       "location-status", "chw-btn", "emergency-btn", "emergency-number",
@@ -132,7 +128,7 @@
   }
 
   function renderLanguageOptions() {
-    [els["language-select"], els["chat-language"]].forEach((select) => {
+    [els["consent-language"], els["language-select"]].forEach((select) => {
       if (!select) return;
       const current = state.language;
       select.innerHTML = "";
@@ -159,28 +155,41 @@
     renderSources();
     renderFacilities();
     renderSaveToggles();
+    renderRecent();
     refreshListenButtons();
   }
 
-  /* ───────────────── screens and consent ───────────────── */
+  /* ───────────────── screens and navigation ───────────────── */
 
   function showScreen(name) {
     state.screen = name;
-    ["consent", "chat", "care"].forEach((screen) => {
-      const node = els[`screen-${screen}`];
-      if (node) node.hidden = screen !== name;
-    });
-    closeSheets();
+    const consent = els["screen-consent"];
+    if (name === "consent") {
+      consent.hidden = false;
+      els.workspace.hidden = true;
+      closeSidebar();
+      return;
+    }
+    consent.hidden = true;
+    els.workspace.hidden = false;
+    els["screen-chat"].hidden = name !== "chat";
+    els["screen-care"].hidden = name !== "care";
+    els["sources-panel"].hidden = name !== "chat";
+    updateNav(name);
+    closeSidebar();
     if (name === "chat" && window.matchMedia("(min-width: 900px)").matches) {
       window.requestAnimationFrame(() => els.question?.focus());
     }
   }
 
+  function updateNav(name) {
+    els["nav-chat"].classList.toggle("active", name === "chat");
+    els["nav-care"].classList.toggle("active", name === "care");
+  }
+
   function openChat() {
     showScreen("chat");
-    if (state.saveChats && state.messages.length === 0) {
-      restoreSavedChats();
-    }
+    if (state.saveChats && state.messages.length === 0) restoreSavedChats();
     if (state.messages.length) {
       hideWelcome();
       renderMessages();
@@ -188,7 +197,78 @@
     } else {
       showWelcome();
     }
+    renderSources();
+    renderRecent();
     refreshListenButtons();
+  }
+
+  function openCare() {
+    showScreen("care");
+    renderFacilities();
+  }
+
+  function openKnowledge() {
+    openSourcesSheet("nav.knowledge");
+    closeSidebar();
+  }
+
+  function openSourcesSheet(titleKey) {
+    const title = els["mobile-sources-title"];
+    if (title) title.textContent = t(titleKey || "chat.sources");
+    openSheet("sources-sheet");
+  }
+
+  function startNewChat() {
+    state.messages = [];
+    state.lastCitations = [];
+    localStorage.removeItem(KEYS.chats);
+    renderMessages();
+    renderSources();
+    renderRecent();
+    showWelcome();
+    closeSidebar();
+    if (window.matchMedia("(min-width: 900px)").matches) els.question.focus();
+  }
+
+  function renderRecent() {
+    const list = els["recent-list"];
+    if (!list) return;
+    list.innerHTML = "";
+    const userMessages = state.messages
+      .map((message, index) => ({ message, index }))
+      .filter((entry) => entry.message.role === "user" && entry.message.content)
+      .slice(-5)
+      .reverse();
+    if (!userMessages.length) {
+      const empty = document.createElement("p");
+      empty.className = "recent-empty";
+      empty.textContent = t("recent.empty");
+      list.appendChild(empty);
+      return;
+    }
+    userMessages.forEach(({ message, index }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "recent-item";
+      button.textContent = message.content;
+      button.title = message.content;
+      button.addEventListener("click", () => {
+        const node = els.messages.querySelector(`.message[data-index="${index}"]`);
+        node?.scrollIntoView({ block: "center", behavior: "smooth" });
+        closeSidebar();
+      });
+      list.appendChild(button);
+    });
+  }
+
+  function toggleSidebar() {
+    els.sidebar.classList.toggle("open");
+    els["sidebar-scrim"].hidden = !els.sidebar.classList.contains("open");
+  }
+
+  function closeSidebar() {
+    els.sidebar.classList.remove("open");
+    els["sidebar-scrim"].hidden = true;
   }
 
   function acceptConsent() {
@@ -243,20 +323,8 @@
     article.className = `message ${message.role}`;
     article.dataset.index = String(index);
 
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.innerHTML =
-      message.role === "assistant"
-        ? '<img src="/static/brand/lafia-mark.png" alt="" />'
-        : t("chat.you");
-
     const main = document.createElement("div");
     main.className = "message-main";
-
-    const author = document.createElement("p");
-    author.className = "message-author";
-    author.textContent = message.role === "assistant" ? t("chat.lafia") : t("chat.you");
-
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     if (message.pending) {
@@ -265,50 +333,22 @@
       bubble.innerHTML = mdToHtml(message.content || "");
       if (message.error) bubble.classList.add("error");
     }
-
-    main.append(author, bubble);
-    article.append(avatar, main);
+    main.appendChild(bubble);
+    article.appendChild(main);
     els.messages.appendChild(article);
 
     if (!message.pending && message.role === "assistant" && !message.error) {
-      renderMessageSources(article, message.citations || []);
       renderMessageActions(article, index);
     }
     return article;
   }
 
-  function renderMessageSources(article, citations) {
-    const main = article.querySelector(".message-main");
-    main.querySelector(".source-chips")?.remove();
-    if (!citations || !citations.length) return;
-
-    const wrap = document.createElement("div");
-    wrap.className = "source-chips";
-    const seen = new Set();
-    citations
-      .filter((citation) => {
-        const key = citation.document_id || citation.filename;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .slice(0, 3)
-      .forEach((citation) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "source-chip";
-      button.innerHTML =
-        '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H11v16H6.5A1.5 1.5 0 0 1 5 18.5v-13ZM13 4h4.5A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>' +
-        `<span>${escapeHtml(citation.filename || t("chat.sources"))}</span>`;
-      button.addEventListener("click", () => openSource(citation));
-      wrap.appendChild(button);
-    });
-    main.appendChild(wrap);
-  }
-
   function renderMessageActions(article, index) {
-    const main = article.querySelector(".message-main");
-    main.querySelector(".message-actions")?.remove();
+    const bubble = article.querySelector(".bubble");
+    if (!bubble) return;
+    bubble.querySelector(".message-actions")?.remove();
+
+    const message = state.messages[index];
     const actions = document.createElement("div");
     actions.className = "message-actions";
 
@@ -323,16 +363,41 @@
     listen.addEventListener("click", () => speakMessage(index));
     if (!getVoiceForLanguage()) listen.hidden = true;
     actions.appendChild(listen);
-    main.appendChild(actions);
+
+    const seen = new Set();
+    (message.citations || [])
+      .filter((citation) => {
+        const key = citation.document_id || citation.filename;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 1)
+      .forEach((citation) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "answer-action source-chip";
+        chip.innerHTML =
+          '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H11v16H6.5A1.5 1.5 0 0 1 5 18.5v-13ZM13 4h4.5A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>' +
+          `<span>${escapeHtml(citation.filename || t("chat.sources"))}, ${escapeHtml(sourceLocation(citation).toLowerCase())}</span>`;
+        chip.addEventListener("click", () => openSource(citation));
+        actions.appendChild(chip);
+      });
+
+    const care = document.createElement("button");
+    care.type = "button";
+    care.className = "answer-action care-inline";
+    care.innerHTML = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg><span>${escapeHtml(t("chat.findCare"))}</span>`;
+    care.addEventListener("click", openCare);
+    actions.appendChild(care);
+
+    bubble.appendChild(actions);
   }
 
   async function submitQuestion() {
     const question = els.question.value.trim();
     if (!question || state.busy) return;
-    if (!state.saveChats) {
-      // never write chats to storage while saving is off
-      localStorage.removeItem(KEYS.chats);
-    }
+    if (!state.saveChats) localStorage.removeItem(KEYS.chats);
 
     const history = state.messages
       .filter((message) => !message.pending && message.content)
@@ -348,6 +413,7 @@
     const userMessage = { role: "user", content: question, ts: Date.now() };
     state.messages.push(userMessage);
     renderMessage(userMessage, state.messages.length - 1);
+    renderRecent();
 
     const assistantMessage = {
       role: "assistant",
@@ -365,16 +431,9 @@
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question,
-          language: state.language,
-          history,
-        }),
+        body: JSON.stringify({ question, language: state.language, history }),
       });
-
-      if (!response.ok) {
-        throw new Error(t("chat.error"));
-      }
+      if (!response.ok) throw new Error(t("chat.error"));
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error(t("chat.error"));
@@ -383,12 +442,14 @@
       let buffer = "";
       let finished = false;
       let scheduled = false;
+      let streamingDone = false;
 
       const paint = () => {
-        if (scheduled) return;
+        if (scheduled || streamingDone) return;
         scheduled = true;
         window.requestAnimationFrame(() => {
           scheduled = false;
+          if (streamingDone) return;
           bubble.innerHTML = mdToHtml(assistantMessage.content);
           scrollToBottom();
         });
@@ -425,14 +486,11 @@
         }
       }
 
+      streamingDone = true;
       assistantMessage.pending = false;
       assistantMessage.ts = Date.now();
-      assistantMessage.citations = preferCited(
-        assistantMessage.citations,
-        assistantMessage.content
-      );
+      assistantMessage.citations = preferCited(assistantMessage.citations, assistantMessage.content);
       bubble.innerHTML = mdToHtml(assistantMessage.content || t("chat.error"));
-      renderMessageSources(article, assistantMessage.citations);
       renderMessageActions(article, state.messages.length - 1);
       setLastCitations(assistantMessage.citations);
     } catch (error) {
@@ -446,6 +504,7 @@
       els["send-btn"].disabled = false;
       assistantMessage.pending = false;
       saveChatsIfEnabled();
+      renderRecent();
       scrollToBottom();
       els.question.focus();
     }
@@ -479,12 +538,12 @@
   function setLastCitations(citations) {
     state.lastCitations = Array.isArray(citations) ? citations : [];
     renderSources();
+    renderRecent();
   }
 
   function renderSources() {
-    const citations = state.lastCitations || [];
-    renderSourceCards(els["sources-list"], citations);
-    renderSourceCards(els["sources-list-mobile"], citations);
+    renderSourceCards(els["sources-list"], state.lastCitations || []);
+    renderSourceCards(els["sources-list-mobile"], state.lastCitations || []);
   }
 
   function renderSourceCards(container, citations) {
@@ -500,16 +559,35 @@
     citations.forEach((citation) => {
       const card = document.createElement("article");
       card.className = "source-card";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.innerHTML =
-        `<h3>${escapeHtml(citation.filename || t("chat.sources"))}</h3>` +
+      const href = sourceHref(citation);
+      const label = citation.source_type === "who" ? t("chat.whoGuidance") : t("chat.documentGuidance");
+      const openLabel = citation.source_type === "who" ? t("chat.openWho") : t("chat.openSource");
+      card.innerHTML =
+        `<p class="source-label">${escapeHtml(label)}</p>` +
+        `<h3>${escapeHtml(displaySourceTitle(citation))}</h3>` +
         `<p>${escapeHtml(sourceLocation(citation))}</p>` +
-        `<p class="excerpt">${escapeHtml(citation.excerpt || "")}</p>`;
-      button.addEventListener("click", () => openSource(citation));
-      card.appendChild(button);
+        `<p class="excerpt">${escapeHtml(citation.excerpt || "")}</p>` +
+        (href
+          ? `<a class="source-open" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(openLabel)}</a>`
+          : "");
+      card.addEventListener("click", (event) => {
+        if (event.target.closest("a")) return;
+        openSource(citation);
+      });
       container.appendChild(card);
     });
+  }
+
+  function displaySourceTitle(citation) {
+    return String(citation.filename || t("chat.sources")).replace(/^WHO\s*-\s*/i, "");
+  }
+
+  function sourceHref(citation) {
+    if (citation.url) return citation.url;
+    if (citation.source_type === "pdf" && citation.document_id) {
+      return `/documents/${encodeURIComponent(citation.document_id)}/inline#page=${citation.page_start || 1}`;
+    }
+    return "";
   }
 
   function sourceLocation(citation) {
@@ -523,27 +601,19 @@
 
   function openSource(citation) {
     els["source-kind"].textContent =
-      citation.source_type === "who" ? t("chat.whoSource") : t("chat.documentSource");
+      citation.source_type === "who" ? t("chat.whoGuidance") : t("chat.documentGuidance");
     els["source-title"].textContent = citation.filename || t("chat.sources");
     els["source-meta"].textContent = sourceLocation(citation);
     els["source-excerpt"].textContent = citation.excerpt || "";
     els["source-actions"].innerHTML = "";
-
-    if (citation.url) {
+    const href = sourceHref(citation);
+    if (href) {
       const link = document.createElement("a");
-      link.href = citation.url;
+      link.href = href;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
-      link.textContent = citation.url;
+      link.textContent = citation.source_type === "who" ? t("chat.openWho") : t("chat.openSource");
       els["source-actions"].appendChild(link);
-    }
-    if (citation.source_type === "pdf" && citation.document_id) {
-      const preview = document.createElement("a");
-      preview.href = `/documents/${encodeURIComponent(citation.document_id)}/inline#page=${citation.page_start || 1}`;
-      preview.target = "_blank";
-      preview.rel = "noopener noreferrer";
-      preview.textContent = `${t("chat.page")} ${citation.page_start || 1}`;
-      els["source-actions"].appendChild(preview);
     }
     openSheet("source-sheet");
   }
@@ -561,7 +631,7 @@
         JSON.stringify({ version: 1, updatedAt: Date.now(), messages })
       );
     } catch (error) {
-      // Storage may be unavailable in private mode; chat still works in memory.
+      /* storage may be unavailable */
     }
   }
 
@@ -599,7 +669,9 @@
     state.lastCitations = [];
     renderMessages();
     renderSources();
+    renderRecent();
     closeSheets();
+    closeSidebar();
     toast(t("chat.deleted"));
   }
 
@@ -638,12 +710,7 @@
 
   async function loadFacilities() {
     const data = await fetchJson("/data/facilities.json", null);
-    if (!data) {
-      if (els["facility-list"]) {
-        els["facility-list"].innerHTML = `<p class="hint">${escapeHtml(t("care.noFacilities"))}</p>`;
-      }
-      return;
-    }
+    if (!data) return;
     state.facilities = Array.isArray(data.facilities) ? data.facilities : [];
     state.emergency = data.emergency || null;
     state.chw = data.chw || null;
@@ -693,7 +760,7 @@
         `<span class="distance-badge">${escapeHtml(distance)}</span></div>` +
         `<p class="facility-meta"><strong>${escapeHtml(t("care.hours"))}:</strong> ${escapeHtml(facility.hours || "")}<br>` +
         `${escapeHtml(facility.address || "")}</p>` +
-        `<a class="facility-call" href="tel:${String(facility.phone || "").replace(/[^\d+]/g, "")}" ` +
+        `<a class="facility-call" href="tel:${String(facility.phone || "").replace(/[^\\d+]/g, "")}" ` +
         `aria-label="${escapeHtml(t("care.callAria"))}: ${escapeHtml(facility.name)}">` +
         `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.6 4.5h2.8l1.4 3.5-1.9 1.4a12 12 0 0 0 5.7 5.7l1.4-1.9 3.5 1.4v2.8a2 2 0 0 1-2.2 2A16 16 0 0 1 4.6 6.7a2 2 0 0 1 2-2.2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>` +
         `${escapeHtml(t("care.call"))} · ${escapeHtml(facility.phone || "")}</a>`;
@@ -710,10 +777,7 @@
     els["location-status"].textContent = t("common.loading");
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        state.location = {
-          lat: position.coords.latitude,
-          lon: position.coords.longitude,
-        };
+        state.location = { lat: position.coords.latitude, lon: position.coords.longitude };
         renderFacilities();
         els["location-status"].textContent = t("care.locationHint");
         els["location-btn"].disabled = false;
@@ -739,7 +803,7 @@
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  /* ───────────────── speech output ───────────────── */
+  /* ───────────────── speech ───────────────── */
 
   function setupSpeechSynthesis() {
     if (!("speechSynthesis" in window)) return;
@@ -812,15 +876,12 @@
   function updateSpeakingButtons() {
     document.querySelectorAll(".listen-btn").forEach((button) => {
       const active = Number(button.dataset.index) === state.speakingIndex;
-      const label = active ? t("chat.stop") : t("chat.listen");
-      button.querySelector("span").textContent = label;
+      button.querySelector("span").textContent = active ? t("chat.stop") : t("chat.listen");
       button.setAttribute("aria-label", active ? t("chat.stop") : t("chat.listenAria"));
       button.classList.toggle("speaking", active);
     });
     refreshListenButtons();
   }
-
-  /* ───────────────── speech input ───────────────── */
 
   function setupSpeechRecognition() {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -874,15 +935,27 @@
     });
   }
 
-  /* ───────────────── UI helpers ───────────────── */
+  /* ───────────────── events ───────────────── */
 
   function bindEvents() {
     els["consent-check"].addEventListener("change", () => {
       els["continue-btn"].disabled = !els["consent-check"].checked;
     });
     els["continue-btn"].addEventListener("click", acceptConsent);
+    els["consent-language"].addEventListener("change", (event) => changeLanguage(event.target.value));
     els["language-select"].addEventListener("change", (event) => changeLanguage(event.target.value));
-    els["chat-language"].addEventListener("change", (event) => changeLanguage(event.target.value));
+
+    els["new-chat"].addEventListener("click", startNewChat);
+    els["nav-chat"].addEventListener("click", openChat);
+    els["nav-care"].addEventListener("click", openCare);
+    els["nav-knowledge"].addEventListener("click", openKnowledge);
+    document.querySelectorAll(".js-menu-btn").forEach((button) => {
+      button.addEventListener("click", toggleSidebar);
+    });
+    els["sidebar-scrim"].addEventListener("click", closeSidebar);
+    document.querySelectorAll(".js-quick-exit").forEach((button) => {
+      button.addEventListener("click", quickExit);
+    });
 
     els["chat-form"].addEventListener("submit", (event) => {
       event.preventDefault();
@@ -896,15 +969,7 @@
       }
     });
 
-    els["quick-exit"].addEventListener("click", quickExit);
-    els["care-quick-exit"].addEventListener("click", quickExit);
-    document.querySelectorAll("[data-quick-exit]").forEach((button) => {
-      button.addEventListener("click", quickExit);
-    });
-
-    els["privacy-btn"].addEventListener("click", () => openSheet("privacy-sheet"));
-    els["sources-btn"].addEventListener("click", () => openSheet("sources-sheet"));
-    els["open-sources"].addEventListener("click", () => openSheet("sources-sheet"));
+    els["sources-btn"].addEventListener("click", () => openSourcesSheet("chat.sources"));
     document.querySelectorAll("[data-close-sheet]").forEach((button) => {
       button.addEventListener("click", closeSheets);
     });
@@ -916,18 +981,10 @@
       button.addEventListener("click", deleteChats);
     });
 
-    els["find-care-btn"].addEventListener("click", () => {
-      showScreen("care");
-      renderFacilities();
-    });
-    els["care-back"].addEventListener("click", () => showScreen("chat"));
     els["location-btn"].addEventListener("click", useLocation);
     els["chw-btn"].addEventListener("click", () => toast(t("care.chwNotConnected")));
-
     document.addEventListener("keydown", handleEscape);
-    window.addEventListener("pagehide", () => {
-      cancelSpeech();
-    });
+    window.addEventListener("pagehide", cancelSpeech);
   }
 
   function openSheet(id) {
@@ -937,13 +994,13 @@
   }
 
   function closeSheets() {
-    ["privacy-sheet", "sources-sheet", "source-sheet"].forEach((id) => {
+    ["sources-sheet", "source-sheet"].forEach((id) => {
       if (els[id]) els[id].hidden = true;
     });
   }
 
   function hasOpenSheet() {
-    return ["privacy-sheet", "sources-sheet", "source-sheet"].some(
+    return ["sources-sheet", "source-sheet"].some(
       (id) => els[id] && !els[id].hidden
     );
   }
@@ -951,7 +1008,7 @@
   function autoResize() {
     const textarea = els.question;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 130)}px`;
   }
 
   function scrollToBottom() {

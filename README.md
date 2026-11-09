@@ -26,6 +26,10 @@ PDF. Lafia is **not** a diagnosis tool and does not replace a health worker.
 | --- | --- |
 | ![Chat on desktop with sources panel](docs/screenshots/04-chat-desktop.png) | ![Find care on desktop](docs/screenshots/05-find-care-desktop.png) |
 
+| Mobile navigation |
+| --- |
+| ![Lafia mobile navigation drawer](docs/screenshots/07-mobile-sidebar.png) |
+
 One codebase, three screens, responsive from 390px phones to desktop.
 
 ## What it does

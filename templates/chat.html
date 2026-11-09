@@ -15,7 +15,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/css/chat.css?v=20261109b" />
+    <link rel="stylesheet" href="/static/css/chat.css?v=20261109d" />
     <title>Lafia Chat AI</title>
   </head>
   <body>
@@ -34,7 +34,7 @@
 
             <label class="language-field" for="language-select">
               <span data-i18n="consent.languageLabel"></span>
-              <select id="language-select" class="language-select" data-i18n-aria="chat.language"></select>
+              <select id="consent-language" class="language-select" data-i18n-aria="chat.language"></select>
             </label>
 
             <h2 class="privacy-heading" data-i18n="consent.privacyTitle"></h2>
@@ -82,189 +82,168 @@
         </div>
       </section>
 
-      <!-- ───────────────── Screen 2: chat ───────────────── -->
-      <section class="screen chat-screen" id="screen-chat" aria-labelledby="chat-title" hidden>
-        <div class="chat-shell">
-          <div class="chat-main">
-            <header class="app-bar">
-              <div class="brand-mini">
-                <img src="/static/brand/lafia-mark.png" alt="" />
-                <span data-i18n="app.brand"></span>
-              </div>
-              <div class="app-bar-actions">
-                <select id="chat-language" class="language-mini" data-i18n-aria="chat.language"></select>
-                <button class="icon-btn mobile-only" id="sources-btn" type="button" data-i18n-aria="chat.sourcesAria">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H11v16H6.5A1.5 1.5 0 0 1 5 18.5v-13ZM13 4h4.5A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-                </button>
-                <button class="icon-btn" id="privacy-btn" type="button" data-i18n-aria="chat.privacyAria">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5 19 6v5.5c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6l7-2.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v3.5M12 15.5h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-                </button>
-                <button class="quick-exit" id="quick-exit" type="button" data-i18n-aria="chat.quickExitAria">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7M17 8l4 4-4 4M21 12H10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  <span data-i18n="chat.quickExit"></span>
-                </button>
-              </div>
-            </header>
+      <!-- ───────────────── Workspace: sidebar + chat/care + sources ───────────────── -->
+      <div class="workspace" id="workspace" hidden>
+        <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
 
-            <main class="messages" id="messages" aria-live="polite">
-              <div class="welcome" id="welcome">
-                <div class="welcome-mark">
-                  <img src="/static/brand/lafia-mark.png" alt="" />
-                </div>
-                <h1 id="chat-title" data-i18n="chat.welcomeTitle"></h1>
-                <p class="lead" data-i18n="chat.welcomeSubtitle"></p>
-                <div class="suggestions" id="suggestions"></div>
-                <p class="disclaimer" data-i18n="chat.disclaimer"></p>
-              </div>
-            </main>
-
-            <div class="composer-wrap">
-              <form class="composer" id="chat-form">
-                <button class="icon-btn mic-btn" id="mic-btn" type="button" data-i18n-aria="chat.micAria">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3.5" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3.5M9 20.5h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-                </button>
-                <label class="sr-only" for="question" data-i18n="chat.inputPlaceholder"></label>
-                <textarea
-                  id="question"
-                  rows="1"
-                  data-i18n-placeholder="chat.inputPlaceholder"
-                  autocomplete="off"
-                ></textarea>
-                <button class="send-btn" id="send-btn" type="submit" data-i18n-aria="chat.sendAria">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5m0 0-6 6m6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
-              </form>
-              <div class="quick-actions">
-                <button class="secondary-btn care-action" id="find-care-btn" type="button">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg>
-                  <span data-i18n="chat.findCare"></span>
-                </button>
-                <button class="secondary-btn mobile-only" id="open-sources" type="button">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H11v16H6.5A1.5 1.5 0 0 1 5 18.5v-13ZM13 4h4.5A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-                  <span data-i18n="chat.sources"></span>
-                </button>
-              </div>
+        <aside class="sidebar" id="sidebar" data-i18n-aria="chat.sidebarAria">
+          <div class="side-brand">
+            <img src="/static/brand/lafia-mark.png" alt="" />
+            <div>
+              <strong data-i18n="app.brand"></strong>
+              <span data-i18n="app.tagline"></span>
             </div>
           </div>
 
-          <aside class="sources-panel desktop-only" aria-labelledby="sources-title">
-            <div class="panel-head">
-              <h2 id="sources-title" data-i18n="chat.sources"></h2>
-            </div>
-            <div class="sources-list" id="sources-list">
-              <p class="empty" data-i18n="chat.sourcesEmpty"></p>
-            </div>
-            <div class="privacy-panel">
-              <label class="switch-row">
-                <input type="checkbox" class="js-save-toggle" />
-                <span>
-                  <strong data-i18n="chat.saveChats"></strong>
-                  <small data-i18n="chat.saveChatsHint"></small>
-                </span>
-              </label>
-              <button class="danger-link js-delete-chats" type="button">
-                <span data-i18n="chat.deleteChats"></span>
-              </button>
-              <button class="secondary-btn quick-exit-panel" type="button" data-quick-exit>
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7M17 8l4 4-4 4M21 12H10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                <span data-i18n="chat.quickExit"></span>
-              </button>
-            </div>
-          </aside>
-        </div>
-      </section>
-
-      <!-- ───────────────── Screen 3: find care ───────────────── -->
-      <section class="screen care-screen" id="screen-care" aria-labelledby="care-title" hidden>
-        <header class="app-bar care-bar">
-          <button class="icon-btn" id="care-back" type="button" data-i18n-aria="common.back">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <button class="new-chat" id="new-chat" type="button">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+            <span data-i18n="chat.newChat"></span>
           </button>
-          <h1 id="care-title" data-i18n="care.title"></h1>
-          <button class="quick-exit" id="care-quick-exit" type="button" data-i18n-aria="chat.quickExitAria">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7M17 8l4 4-4 4M21 12H10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span data-i18n="chat.quickExit"></span>
-          </button>
-        </header>
 
-        <main class="care-main">
-          <p class="lead" data-i18n="care.subtitle"></p>
-          <div class="care-actions">
-            <button class="primary-btn" id="location-btn" type="button" data-i18n-aria="care.locationAria">
+          <nav class="side-nav" data-i18n-aria="chat.sidebarAria">
+            <button class="side-nav-item active" id="nav-chat" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v6a2.5 2.5 0 0 1-2.5 2.5H10l-5 4V6.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <span data-i18n="nav.chat"></span>
+            </button>
+            <button class="side-nav-item" id="nav-care" type="button">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg>
-              <span data-i18n="care.useLocation"></span>
+              <span data-i18n="nav.findCare"></span>
+            </button>
+            <button class="side-nav-item" id="nav-knowledge" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H11v16H6.5A1.5 1.5 0 0 1 5 18.5v-13ZM13 4h4.5A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <span data-i18n="nav.knowledge"></span>
+            </button>
+          </nav>
+
+          <div class="recent-block">
+            <p class="side-label" data-i18n="recent.label"></p>
+            <div class="recent-list" id="recent-list"></div>
+          </div>
+
+          <div class="sidebar-bottom">
+            <label class="side-language" for="language-select">
+              <span data-i18n="chat.language"></span>
+              <select id="language-select" class="language-select" data-i18n-aria="chat.language"></select>
+            </label>
+            <button class="delete-side js-delete-chats" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7h14M9 7V4.5h6V7m-9 0 .8 13h10.4L18 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span data-i18n="chat.deleteChats"></span>
             </button>
           </div>
-          <p class="hint" id="location-status" data-i18n="care.locationHint"></p>
+        </aside>
 
-          <h2 class="section-title" data-i18n="care.nearby"></h2>
-          <div class="facility-list" id="facility-list" aria-live="polite"></div>
-
-          <section class="chw-card" aria-labelledby="chw-title">
-            <h2 id="chw-title" data-i18n="care.chwTitle"></h2>
-            <p data-i18n="care.chwBody"></p>
-            <button class="secondary-btn" id="chw-btn" type="button" data-i18n="care.chwButton"></button>
-          </section>
-
-          <a class="emergency-btn" id="emergency-btn" href="tel:112">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.6 4.5h2.8l1.4 3.5-1.9 1.4a12 12 0 0 0 5.7 5.7l1.4-1.9 3.5 1.4v2.8a2 2 0 0 1-2.2 2A16 16 0 0 1 4.6 6.7a2 2 0 0 1 2-2.2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
-            <span>
-              <strong data-i18n="care.emergency"></strong>
-              <small id="emergency-number"></small>
-            </span>
-          </a>
-          <p class="hint" data-i18n="care.emergencyNote"></p>
-          <p class="placeholder-note" data-i18n="care.placeholderNote"></p>
-        </main>
-      </section>
-
-      <!-- ───────────────── Privacy sheet ───────────────── -->
-      <div class="sheet" id="privacy-sheet" hidden>
-        <div class="sheet-scrim" data-close-sheet></div>
-        <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
-          <div class="sheet-head">
-            <h2 id="privacy-title" data-i18n="privacy.title"></h2>
-            <button class="icon-btn" type="button" data-close-sheet data-i18n-aria="common.close">
+        <!-- Chat -->
+        <section class="chat-main" id="screen-chat" aria-labelledby="chat-title">
+          <header class="chat-header">
+            <button class="icon-btn menu-btn js-menu-btn" type="button" data-i18n-aria="chat.menuAria">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+            <div class="chat-heading">
+              <h1 data-i18n="chat.chatTitle"></h1>
+              <p data-i18n="chat.headerSubtitle"></p>
+            </div>
+            <button class="icon-btn mobile-only" id="sources-btn" type="button" data-i18n-aria="chat.sourcesAria">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H11v16H6.5A1.5 1.5 0 0 1 5 18.5v-13ZM13 4h4.5A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="quick-exit js-quick-exit" type="button" data-i18n-aria="chat.quickExitAria">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+              <span data-i18n="chat.quickExit"></span>
             </button>
-          </div>
-          <div class="sheet-body">
-            <section class="privacy-block">
-              <h3 data-i18n="privacy.noAccountTitle"></h3>
-              <p data-i18n="privacy.noAccountBody"></p>
-            </section>
-            <section class="privacy-block">
-              <h3 data-i18n="privacy.saveTitle"></h3>
-              <p data-i18n="privacy.saveBody"></p>
-              <label class="switch-row">
-                <input type="checkbox" class="js-save-toggle" />
-                <span>
-                  <strong data-i18n="chat.saveChats"></strong>
-                  <small data-i18n="chat.saveChatsHint"></small>
-                </span>
-              </label>
-            </section>
-            <section class="privacy-block">
-              <h3 data-i18n="privacy.deleteTitle"></h3>
-              <p data-i18n="privacy.deleteBody"></p>
-              <button class="danger-btn js-delete-chats" type="button" data-i18n="privacy.deleteButton"></button>
-            </section>
-            <section class="privacy-block">
-              <h3 data-i18n="privacy.quickExitTitle"></h3>
-              <p data-i18n="privacy.quickExitBody"></p>
-              <button class="secondary-btn" type="button" data-quick-exit>
-                <span data-i18n="chat.quickExit"></span>
+          </header>
+
+          <main class="messages" id="messages" aria-live="polite">
+            <div class="welcome" id="welcome">
+              <div class="welcome-mark">
+                <img src="/static/brand/lafia-mark.png" alt="" />
+              </div>
+              <h1 id="chat-title" data-i18n="chat.welcomeTitle"></h1>
+              <p class="lead" data-i18n="chat.welcomeSubtitle"></p>
+              <div class="suggestions" id="suggestions"></div>
+              <p class="disclaimer" data-i18n="chat.disclaimer"></p>
+            </div>
+          </main>
+
+          <div class="composer-wrap">
+            <form class="composer" id="chat-form">
+              <button class="icon-btn mic-btn" id="mic-btn" type="button" data-i18n-aria="chat.micAria">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3.5" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3.5M9 20.5h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
               </button>
-            </section>
-            <section class="privacy-block">
-              <h3 data-i18n="privacy.locationTitle"></h3>
-              <p data-i18n="privacy.locationBody"></p>
-            </section>
+              <label class="sr-only" for="question" data-i18n="chat.inputPlaceholder"></label>
+              <textarea id="question" rows="1" data-i18n-placeholder="chat.inputPlaceholder" autocomplete="off"></textarea>
+              <button class="send-btn" id="send-btn" type="submit" data-i18n-aria="chat.sendAria">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5m0 0-6 6m6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </form>
+            <p class="footer-note" data-i18n="chat.footerNote"></p>
           </div>
-        </div>
+        </section>
+
+        <!-- Find care -->
+        <section class="care-main" id="screen-care" aria-labelledby="care-title" hidden>
+          <header class="chat-header">
+            <button class="icon-btn menu-btn js-menu-btn" type="button" data-i18n-aria="chat.menuAria">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+            <div class="chat-heading">
+              <h1 id="care-title" data-i18n="care.title"></h1>
+              <p data-i18n="care.subtitle"></p>
+            </div>
+            <button class="quick-exit js-quick-exit" type="button" data-i18n-aria="chat.quickExitAria">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+              <span data-i18n="chat.quickExit"></span>
+            </button>
+          </header>
+
+          <main class="care-body">
+            <div class="care-actions">
+              <button class="primary-btn" id="location-btn" type="button" data-i18n-aria="care.locationAria">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg>
+                <span data-i18n="care.useLocation"></span>
+              </button>
+            </div>
+            <p class="hint" id="location-status" data-i18n="care.locationHint"></p>
+
+            <h2 class="section-title" data-i18n="care.nearby"></h2>
+            <div class="facility-list" id="facility-list" aria-live="polite"></div>
+
+            <section class="chw-card" aria-labelledby="chw-title">
+              <h2 id="chw-title" data-i18n="care.chwTitle"></h2>
+              <p data-i18n="care.chwBody"></p>
+              <button class="secondary-btn" id="chw-btn" type="button" data-i18n="care.chwButton"></button>
+            </section>
+
+            <a class="emergency-btn" id="emergency-btn" href="tel:112">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.6 4.5h2.8l1.4 3.5-1.9 1.4a12 12 0 0 0 5.7 5.7l1.4-1.9 3.5 1.4v2.8a2 2 0 0 1-2.2 2A16 16 0 0 1 4.6 6.7a2 2 0 0 1 2-2.2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+              <span>
+                <strong data-i18n="care.emergency"></strong>
+                <small id="emergency-number"></small>
+              </span>
+            </a>
+            <p class="hint" data-i18n="care.emergencyNote"></p>
+            <p class="placeholder-note" data-i18n="care.placeholderNote"></p>
+          </main>
+        </section>
+
+        <!-- Desktop sources / your data -->
+        <aside class="sources-panel" id="sources-panel" aria-labelledby="sources-title">
+          <div class="panel-head">
+            <h2 id="sources-title" data-i18n="chat.sources"></h2>
+          </div>
+          <div class="sources-list" id="sources-list">
+            <p class="empty" data-i18n="chat.sourcesEmpty"></p>
+          </div>
+          <div class="your-data">
+            <h3 data-i18n="data.title"></h3>
+            <label class="checkbox-row">
+              <input type="checkbox" class="js-save-toggle" />
+              <span data-i18n="chat.saveChats"></span>
+            </label>
+            <p data-i18n="data.hint"></p>
+          </div>
+        </aside>
       </div>
 
-      <!-- ───────────────── Sources sheet (mobile) ───────────────── -->
+      <!-- ───────────────── Sources sheet (mobile / knowledge base) ───────────────── -->
       <div class="sheet" id="sources-sheet" hidden>
         <div class="sheet-scrim" data-close-sheet></div>
         <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="mobile-sources-title">
@@ -277,6 +256,15 @@
           <div class="sheet-body">
             <div class="sources-list" id="sources-list-mobile">
               <p class="empty" data-i18n="chat.sourcesEmpty"></p>
+            </div>
+            <div class="your-data">
+              <h3 data-i18n="data.title"></h3>
+              <label class="checkbox-row">
+                <input type="checkbox" class="js-save-toggle" />
+                <span data-i18n="chat.saveChats"></span>
+              </label>
+              <p data-i18n="data.hint"></p>
+              <button class="danger-btn js-delete-chats" type="button" data-i18n="chat.deleteChats"></button>
             </div>
           </div>
         </div>
@@ -306,6 +294,6 @@
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     </div>
 
-    <script src="/static/js/chat.js?v=20261109b" defer></script>
+    <script src="/static/js/chat.js?v=20261109d" defer></script>
   </body>
 </html>

@@ -46,3 +46,7 @@ test-results/
 
 test-local.pdf
 test.pdf
+
+# Local design references / OS metadata
+._*
+Screen Shot*.png

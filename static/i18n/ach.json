@@ -113,5 +113,22 @@
   "care.noFacilities": "Pe ononge kony.",
   "care.quickExit": "Quick exit",
   "care.locationAria": "Use my location to sort facilities by distance",
-  "care.callAria": "Call this facility"
+  "care.callAria": "Call this facility",
+  "nav.chat": "Chat",
+  "nav.findCare": "Find care",
+  "nav.knowledge": "Knowledge base",
+  "recent.label": "RECENT",
+  "recent.empty": "Your questions will appear here.",
+  "chat.newChat": "New chat",
+  "chat.chatTitle": "Lafia Chat AI",
+  "chat.headerSubtitle": "Answers from WHO guidance and your documents",
+  "chat.footerNote": "General health information, not a diagnosis. In an emergency, contact a health worker.",
+  "data.title": "Your data",
+  "data.hint": "Off by default. Delete everything anytime.",
+  "chat.whoGuidance": "WHO guidance",
+  "chat.documentGuidance": "Document",
+  "chat.openWho": "Open on who.int",
+  "chat.menuAria": "Open menu",
+  "chat.sidebarAria": "Navigation",
+  "chat.openSource": "Open source"
 }
