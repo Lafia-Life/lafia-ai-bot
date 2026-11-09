@@ -458,8 +458,8 @@ h3 {
 
 /* sidebar */
 .sidebar {
-  width: 220px;
-  flex: 0 0 220px;
+  width: 260px;
+  flex: 0 0 260px;
   display: flex;
   flex-direction: column;
   padding: 16px 13px 12px;
@@ -1139,8 +1139,8 @@ h3 {
 
 /* right sources panel */
 .sources-panel {
-  width: 260px;
-  flex: 0 0 260px;
+  width: 320px;
+  flex: 0 0 320px;
   display: flex;
   flex-direction: column;
   min-height: 0;
