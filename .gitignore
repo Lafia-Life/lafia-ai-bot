@@ -1,9 +1,48 @@
+# Python
 __pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment and secrets
 .env
+.env.*
+!.env.example
+
+# Runtime data and private user content
 storage/chroma/
 storage/uploads/
+storage/who_cache/
+storage/data/*.json
+storage/*.log
+storage/*.pid
+storage/**/*.log
 *.sqlite
-venv/
-__pycache__/
-*.pyc
-.env
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+chat_logs/
+logs/
+
+# Uploaded documents and local caches
+uploads/
+data/*.private.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node / test tooling
+node_modules/
+playwright-report/
+test-results/
+
+test-local.pdf
+test.pdf

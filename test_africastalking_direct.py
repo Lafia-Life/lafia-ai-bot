@@ -3,11 +3,14 @@
 Direct test of Africa's Talking API without our application
 """
 
+import os
 import requests
 
 # Your current API details
-API_KEY = "REDACTED_AFRICAS_TALKING_KEY"
-USERNAME = "sandbox"
+API_KEY = os.getenv("AFRICAS_TALKING_API_KEY", "")
+if not API_KEY:
+    raise SystemExit("Set AFRICAS_TALKING_API_KEY before running this script.")
+USERNAME = os.getenv("AFRICAS_TALKING_USERNAME", "sandbox")
 
 def test_authentication():
     """Test basic authentication"""
