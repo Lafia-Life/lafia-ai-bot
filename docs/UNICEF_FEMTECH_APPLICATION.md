@@ -4,7 +4,7 @@
 **Country:** Nigeria
 **Call:** UNICEF FemTech Ventures, second cohort
 **Prototype:** Working build; public repository and demo walkthrough
-**Repository:** <https://github.com/egesamichael/lafia-ai-bot>
+**Repository:** <https://github.com/Lafia-Life/lafia-ai-bot>
 **Contact:** Project team via the UNICEF application form
 
 > This pack describes the working prototype and the proposed 12-month programme.
@@ -228,7 +228,7 @@ Full detail and verification checks: `docs/SAFETY_AND_PRIVACY.md`.
 ### Repository governance
 
 The public repository is at
-<https://github.com/egesamichael/lafia-ai-bot>. Changes go through pull requests
+<https://github.com/Lafia-Life/lafia-ai-bot>. Changes go through pull requests
 with linear history. CodeQL, secret scanning and push protection are enabled.
 Credentials are managed outside the repository; only `.env.example` is committed.
 

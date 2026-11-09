@@ -9,7 +9,7 @@ No secret values are reproduced in this document.
 
 On 9 November 2026 the rewritten history was pushed to a new public repository:
 
-- **New repository:** <https://github.com/egesamichael/lafia-ai-bot>
+- **New repository:** <https://github.com/Lafia-Life/lafia-ai-bot>
 - **Default branch:** `master`
 - **Branches:** `master` and `add_voice_feature`
 - **Secret scanning / push protection / Dependabot:** enabled
@@ -116,7 +116,7 @@ The repository is already public. The remaining steps are:
 1. Rotate the Africa's Talking and DeepSeek keys listed above.
 2. Keep `.env` local; commit only `.env.example`.
 3. Confirm CI remains green and secret scanning finds nothing in new pushes.
-4. Use only `egesamichael/lafia-ai-bot` for the UNICEF application.
+4. Use only `Lafia-Life/lafia-ai-bot` for the UNICEF application.
 
 ## Ongoing prevention
 

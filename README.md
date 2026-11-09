@@ -2,7 +2,7 @@
 
 **A private, source-cited health companion for women and girls.**
 
-**Repository:** <https://github.com/egesamichael/lafia-ai-bot>
+**Repository:** <https://github.com/Lafia-Life/lafia-ai-bot>
 
 Lafia answers health questions in plain language from two sources:
 
