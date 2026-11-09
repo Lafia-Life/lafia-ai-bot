@@ -6,8 +6,8 @@
 **Deadline:** 11 November 2026
 **Prototype:** local working build, `http://localhost:8000`
 **Repository:** <https://github.com/egesamichael/lafia-ai-bot> — clean public
-history; secret scanning, push protection and Dependabot enabled. Provider-key
-rotation and deletion of the old `chatlearning` repo are still required (see
+history; secret scanning, push protection and Dependabot enabled. The previous
+`chatlearning` repository was deleted; provider-key rotation remains (see
 `docs/SECRETS_AUDIT.md`).
 **Contact:** `[TO CONFIRM]`
 
@@ -240,9 +240,7 @@ Remaining before the application:
 
 1. Rotate the Africa’s Talking and DeepSeek keys identified in
    `docs/SECRETS_AUDIT.md`.
-2. Delete the old `egesamichael/chatlearning` repository after granting the
-   GitHub CLI `delete_repo` scope.
-3. Keep `.env` local; commit only `.env.example`.
+2. Keep `.env` local; commit only `.env.example`.
 
 The open-source commitment is real, but **key rotation is still an external
 provider action and must not be skipped**.

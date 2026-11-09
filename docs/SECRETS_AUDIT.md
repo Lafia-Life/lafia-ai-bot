@@ -15,9 +15,9 @@ On 9 November 2026 the rewritten history was pushed to a new public repository:
 - **Secret scanning / push protection / Dependabot:** enabled
 - **Current refs:** 0 matches for the audited secret patterns
 
-The old `egesamichael/chatlearning` repository still exists and still serves its
-old commits and secret-scanning alert. Deleting it requires the GitHub CLI
-`delete_repo` scope. Once deleted, the old commit URLs and alert disappear.
+The old `egesamichael/chatlearning` repository was **deleted on 9 November
+2026**. Its old repo URL, old commit URLs and secret-scanning alert now return
+HTTP 404. The clean replacement is the only repository.
 
 ## Remediation performed on 9 November 2026
 
@@ -114,11 +114,9 @@ No Twilio, Google, GitHub or private-key material was found.
 The repository is already public. The remaining steps are:
 
 1. Rotate the Africa's Talking and DeepSeek keys listed above.
-2. Delete the old `egesamichael/chatlearning` repository after granting the
-   `delete_repo` scope.
-3. Keep `.env` local; commit only `.env.example`.
-4. Confirm CI remains green and secret scanning finds nothing in new pushes.
-5. Use only the new repository for the UNICEF application.
+2. Keep `.env` local; commit only `.env.example`.
+3. Confirm CI remains green and secret scanning finds nothing in new pushes.
+4. Use only `egesamichael/lafia-ai-bot` for the UNICEF application.
 
 ## Ongoing prevention
 

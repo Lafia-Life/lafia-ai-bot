@@ -74,7 +74,7 @@ facilities and a small pilot, it can reach **8/10**.
 ## Highest-impact work before submitting
 
 1. Confirm legal entity, country, CAC and women-led/under-35 status.
-2. Rotate the exposed provider keys and delete the old `chatlearning` repository (`docs/SECRETS_AUDIT.md`).
+2. Rotate the exposed provider keys; the old repository has been deleted (`docs/SECRETS_AUDIT.md`).
 3. Deploy on HTTPS; the repository is already public.
 4. Replace placeholder facilities and the emergency number.
 5. Human-review Acholi, Ateso and Lusoga strings and key health terms.

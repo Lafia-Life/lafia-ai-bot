@@ -69,7 +69,7 @@ One codebase, three screens, responsive from 390px phones to desktop.
 | Answers | Working: runtime WHO retrieval, citations, language-aware prompting |
 | Voice | Working in supported browsers; Listen hidden when no matching voice exists |
 | Privacy | Working: consent, no account, chats off by default, local-only saving, delete, Quick exit, local-only location |
-| Open source | Clean public repo live; protections enabled. Provider-key rotation and deletion of the old repo pending. |
+| Open source | Clean public repo live; old repo deleted; protections enabled. Provider-key rotation pending. |
 | Clinical/field validation | Not yet done |
 | Impact measurement | Not yet done |
 
@@ -205,8 +205,8 @@ health**, with adjacent value in maternal/newborn care and mental wellbeing.
   [`docs/UNICEF_FEMTECH_FIT.md`](docs/UNICEF_FEMTECH_FIT.md)
 
 Before submitting: confirm legal entity/CAC and women-led status, rotate the
-exposed provider keys, delete the old `chatlearning` repository, replace
-placeholder facilities, complete human translation review and record the demo.
+exposed provider keys, replace placeholder facilities, complete human
+translation review and record the demo.
 
 ## Contributing
 
