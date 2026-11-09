@@ -15,7 +15,8 @@ class VideoStore:
         self._storage_path = base_path.parent  # Go up one level to get storage directory
         self._uploads_path = self._storage_path / "uploads"  # Same as documents uploads
         self._uploads_path.mkdir(parents=True, exist_ok=True)
-        
+        self._file_path.parent.mkdir(parents=True, exist_ok=True)
+
         if not self._file_path.exists():
             self._write({})
 
