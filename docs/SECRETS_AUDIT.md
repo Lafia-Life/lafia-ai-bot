@@ -5,6 +5,20 @@ Scope: current working tree and local git history of this repository.
 
 No secret values are reproduced in this document.
 
+## Clean replacement repository
+
+On 9 November 2026 the rewritten history was pushed to a new public repository:
+
+- **New repository:** <https://github.com/egesamichael/lafia-ai-bot>
+- **Default branch:** `master`
+- **Branches:** `master` and `add_voice_feature`
+- **Secret scanning / push protection / Dependabot:** enabled
+- **Current refs:** 0 matches for the audited secret patterns
+
+The old `egesamichael/chatlearning` repository still exists and still serves its
+old commits and secret-scanning alert. Deleting it requires the GitHub CLI
+`delete_repo` scope. Once deleted, the old commit URLs and alert disappear.
+
 ## Remediation performed on 9 November 2026
 
 - Backed up the pre-rewrite repository to a local bundle outside the repo.
@@ -100,11 +114,11 @@ No Twilio, Google, GitHub or private-key material was found.
 The repository is already public. The remaining steps are:
 
 1. Rotate the Africa's Talking and DeepSeek keys listed above.
-2. Resolve the GitHub secret-scanning alert only after the key is revoked.
-3. Ask GitHub Support to purge old unreachable commits, or delete and recreate
-   the repository if a completely clean public object history is required.
-4. Keep `.env` local; commit only `.env.example`.
-5. Confirm CI remains green and secret scanning finds nothing in new pushes.
+2. Delete the old `egesamichael/chatlearning` repository after granting the
+   `delete_repo` scope.
+3. Keep `.env` local; commit only `.env.example`.
+4. Confirm CI remains green and secret scanning finds nothing in new pushes.
+5. Use only the new repository for the UNICEF application.
 
 ## Ongoing prevention
 
