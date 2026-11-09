@@ -5,7 +5,7 @@
 **Call:** UNICEF FemTech Ventures, second cohort
 **Deadline:** 11 November 2026
 **Prototype:** local working build, `http://localhost:8000`
-**Repository:** <https://github.com/egesamichael/chatlearning> — public; secret
+**Repository:** <https://github.com/egesamichael/lafia-ai-bot> — public; secret
 history rewritten on 9 November 2026. Provider-key rotation and old-SHA cache
 purge are still required (see `docs/SECRETS_AUDIT.md`).
 **Contact:** `[TO CONFIRM]`
@@ -231,7 +231,7 @@ Full detail and verification checks: `docs/SAFETY_AND_PRIVACY.md`.
 ### Public repository status
 
 The repository is public at
-<https://github.com/egesamichael/chatlearning>. On 9 November 2026 the history
+<https://github.com/egesamichael/lafia-ai-bot>. On 9 November 2026 the history
 was rewritten, both active branches were force-pushed, and GitHub secret
 scanning, push protection and Dependabot updates were enabled.
 

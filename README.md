@@ -2,6 +2,8 @@
 
 **A private, source-cited health companion for women and girls.**
 
+**Repository:** <https://github.com/egesamichael/lafia-ai-bot>
+
 Lafia answers health questions in plain language from two sources:
 
 1. documents an organisation uploads (PDF, image, SCORM or web page);

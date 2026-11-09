@@ -113,7 +113,7 @@ docker compose version
 ## 5.3 Clone and configure project
 
 ```bash
-git clone https://github.com/egesamichael/chatlearning.git
+git clone https://github.com/egesamichael/lafia-ai-bot.git
 cd chatlearning
 cp .env.example .env
 ```
