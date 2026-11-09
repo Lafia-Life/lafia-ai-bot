@@ -1,275 +1,168 @@
-# PDF Chat Assistant MVP
+# Lafia Chat AI
 
-Minimal FastAPI application that lets you upload PDF documents (and now images with OCR), index them with OpenAI-compatible (or local) embeddings + Chroma, and ask streaming questions with source citations.
+**A private, source-cited health companion for women and girls.**
 
-**🆕 SMS Integration for Rural Access**: Now includes SMS-based AI assistance for users in rural areas without internet access, specifically optimized for Uganda using Africa's Talking SMS gateway. [See SMS Setup Guide →](SMS_SETUP_UGANDA.md)
+Lafia answers health questions in plain language from two sources:
 
----
+1. documents an organisation uploads (PDF, image, SCORM or web page);
+2. WHO health pages fetched at runtime (maternal health, contraception,
+   menstrual health, TB, HIV, malaria, nutrition, mental health and more).
 
-## Prerequisites
+Every answer shows the passages it used and links to the WHO page or uploaded
+PDF. Lafia is **not** a diagnosis tool and does not replace a health worker.
 
-- Python 3.11+
-- `git`
-- An OpenAI-compatible API key (OpenAI, DeepSeek, etc.) if you want cloud completions. Without a key, the server can still ingest PDFs but cannot generate answers.
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed locally if you plan to ingest images outside Docker.
+> **Prototype status.** The default flow needs no account. Chats are unsaved
+> unless the user enables saving on their device. Read
+> [`docs/SAFETY_AND_PRIVACY.md`](docs/SAFETY_AND_PRIVACY.md) and
+> [`SECURITY.md`](SECURITY.md) before using real health data.
 
----
+## Screens
 
-## Step-by-Step: Run the Server Locally
+| Consent | Chat (phone) | Find care (phone) |
+| --- | --- | --- |
+| ![Language and consent](docs/screenshots/01-consent-mobile.png) | ![Chat on a phone](docs/screenshots/02-chat-mobile.png) | ![Find care on a phone](docs/screenshots/03-find-care-mobile.png) |
 
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/egesamichael/chatlearning.git
-   cd chatlearning
-   ```
-
-2. **Create a virtual environment**
-
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate  # Windows: .venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-
-   ```bash
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment variables**
-
-   ```bash
-   cp .env.example .env
-   # open .env in your editor and set OPENAI_API_KEY (or DEEPSEEK_API_KEY),
-   # OPENAI_BASE_URL, CHAT_MODEL, etc.
-   ```
-
-5. **(Optional) Verify the code compiles**
-
-   ```bash
-   python -m compileall app
-   ```
-
-6. **Launch the FastAPI dev server**
-
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-
-   A VS Code task named “Run FastAPI dev server” is already configured if you prefer running through the editor.
-
-7. **Open the UI**
-
-   - End users: [http://127.0.0.1:8000](http://127.0.0.1:8000) or `/chat` for the read-only chat experience.
-   - Curators: [http://127.0.0.1:8000/upload](http://127.0.0.1:8000/upload) to manage PDFs or scrape web pages.
-
-   Chat responses stream token-by-token, and supporting passages appear in the left panel. Use **Scrape URL** on the upload route when the content is not available as a PDF; the app will cite the source link in answers.
-
-8. **Stop the server**
-
-   Press `Ctrl+C` in the terminal (or stop the VS Code task) when you are finished.
-
----
-
-## Run with Docker
-
-1. **Build the image**
-
-   ```bash
-   docker build -t chatlearning:latest .
-   ```
-
-2. **Copy and edit environment file**
-
-   ```bash
-   cp .env.example .env
-   # edit .env with your API key and preferred models
-   ```
-
-3. **Start the container**
-
-   ```bash
-   docker run --rm \
-     --env-file .env \
-     -p 8000:8000 \
-     -v chatlearning_data:/app/storage \
-     chatlearning:latest
-   ```
-
-   - `--env-file .env` passes your API key and configuration.
-   - `-v chatlearning_data:/app/storage` keeps ingested documents and embeddings between runs (Docker named volume).
-
-4. **Open the app**
-
-   Browse to [http://127.0.0.1:8000](http://127.0.0.1:8000) just as with local development.
-
-5. **Shutdown**
-
-   Press `Ctrl+C` in the Docker terminal or run `docker stop <container-id>` from another shell.
-
----
-
-## Run App + Ollama with Docker Compose
-
-The included `docker-compose.yml` supports both remote and local LLM setups:
-
-- **Remote (default)** – skips Ollama entirely and uses whatever API settings you supply in `.env`.
-- **Local** – runs Ollama via a compose profile so the app can stay offline.
-
-1. **Set up environment**
-
-   ```bash
-   cp .env.example .env
-    # edit .env with the provider you want to use
-   ```
-
-2. **Choose a mode**
-
-   - Remote (e.g. OpenAI/DeepSeek):
-
-     ```bash
-     docker compose up --build
-     ```
-
-   - Local Ollama:
-
-     ```bash
-       export OLLAMA_MODEL=llama3        # or phi3, mistral, etc.
-       # ensure .env points OPENAI_BASE_URL to http://ollama:11434/v1 and sets CHAT_MODEL/EMBEDDING_BACKEND
-     docker compose --profile local-llm up --build
-     ```
-
-     The first run pulls the selected Ollama model (several GB). Subsequent runs reuse the retained `ollama_data` volume.
-
-3. **Access the UI**
-
-   - Chat: [http://127.0.0.1:8000](http://127.0.0.1:8000)
-   - Upload management: [http://127.0.0.1:8000/upload](http://127.0.0.1:8000/upload)
-
-4. **Stop the stack**
-
-   Use `Ctrl+C`, or run `docker compose down`. Append `--profile local-llm` if you started Ollama and want to stop just that profile. Add `--volumes` to remove stored embeddings/uploads/models.
-
----
-
-## How It Works
-
-- **Upload**: PDFs are stored under `storage/uploads/`, parsed with `pypdf`, chunked into overlapping windows, and embedded via OpenAI or a local SentenceTransformers model. Image uploads (`.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp`, `.webp`) are OCR’d with Tesseract before chunking so scans and screenshots are searchable too.
-- **Web Scrape**: Fetches HTML with httpx + BeautifulSoup, strips boilerplate, chunks the cleaned article text, and stores citations with the original URL.
-- **Index**: Embeddings and metadata (document id, filename, page numbers) are persisted in a local Chroma collection under `storage/chroma/`.
-- **Chat**: A question is embedded, relevant chunks are retrieved, and the response is generated with the configured chat model. Answers stream back in real time, and citations include excerpts for quick preview.
-- **Caching**: Recently asked questions are cached so repeated prompts return instantly without re-hitting the model.
-
----
-
-## Environment Variables
-
-| Name | Description |
+| Chat (desktop) | Find care (desktop) |
 | --- | --- |
-| `OPENAI_API_KEY` | OpenAI-compatible key (DeepSeek, etc.). Leave empty to disable remote chat. |
-| `DEEPSEEK_API_KEY` | Optional alias for `OPENAI_API_KEY`. If set, overrides the value above. |
-| `OPENAI_BASE_URL` | Optional. Set to `https://api.deepseek.com` (or any OpenAI-compatible endpoint). |
-| `DEEPSEEK_BASE_URL` | Optional alias for `OPENAI_BASE_URL`. |
-| `CHAT_MODEL` | Chat completion model (e.g. `gpt-4o-mini`, `deepseek-chat`). |
-| `EMBEDDING_BACKEND` | `auto`, `openai`, or `local`. `auto` picks `openai` when a key is present. |
-| `EMBEDDING_MODEL` | Used when `EMBEDDING_BACKEND=openai`. Defaults to `text-embedding-3-small`. |
-| `LOCAL_EMBEDDING_MODEL` | SentenceTransformers model name (defaults to `all-MiniLM-L6-v2`). |
+| ![Chat on desktop with sources panel](docs/screenshots/04-chat-desktop.png) | ![Find care on desktop](docs/screenshots/05-find-care-desktop.png) |
 
----
+One codebase, three screens, responsive from 390px phones to desktop.
 
-## DeepSeek Setup
+## What it does
 
-1. Set either `OPENAI_API_KEY` or `DEEPSEEK_API_KEY` in `.env` to your DeepSeek key (e.g. `sk-...`).
-2. Set `OPENAI_BASE_URL=https://api.deepseek.com` (or use the `DEEPSEEK_BASE_URL` alias).
-3. Set `CHAT_MODEL=deepseek-chat` (or any other DeepSeek-compatible chat model).
-4. Set `EMBEDDING_BACKEND=local` so embeddings run on the bundled SentenceTransformers model.
+- Language picker: English, Kiswahili, Luganda, Acholi, Ateso, Lusoga, with
+  English fallback for missing strings.
+- Required “not a diagnosis” consent before chat.
+- Streaming answers with markdown, WHO/document source chips and a Listen button.
+- Voice input through the browser Speech Recognition API.
+- **Quick exit** button and Escape-twice shortcut using `location.replace`.
+- **Find care** with one-time browser geolocation, client-side distances and
+  clearly marked placeholder facilities from `data/facilities.json`.
+- Desktop Sources panel and an opt-in “Save my chats on this device” switch.
+- Delete-my-chats control that removes all browser-stored chat data.
 
----
+## Quick start (under 10 minutes)
 
-## Offline LLM Option (Ollama)
-
-If you want the whole stack to run without internet access, you can host a local LLM that speaks the OpenAI API using [Ollama](https://ollama.com/):
-
-1. **Install Ollama**
-
-   - macOS / Linux: follow the instructions at [ollama.com/download](https://ollama.com/download).
-   - Windows: use the official preview installer or run inside WSL.
-
-2. **Pull a compatible model**
-
-   ```bash
-   ollama pull llama3
-   ```
-
-   Any OpenAI-compatible Ollama model works (e.g. `phi3`, `mistral`). Larger models need more RAM/VRAM.
-
-3. **Start Ollama’s OpenAI bridge**
-
-   Ollama exposes an OpenAI-style endpoint at `http://127.0.0.1:11434/v1` as soon as it’s running. Keep the Ollama service alive (e.g. `ollama serve`).
-
-4. **Configure the app to use Ollama**
-
-   Update `.env`:
-
-   ```env
-   OPENAI_API_KEY=dummy-key          # any non-empty string
-   OPENAI_BASE_URL=http://127.0.0.1:11434/v1
-   CHAT_MODEL=llama3
-   EMBEDDING_BACKEND=local           # keeps embeddings offline
-   ```
-
-   Since Ollama does not require an API key, any placeholder value is fine.
-
-5. **Run the app as usual**
-
-   Launch `uvicorn` (or the Docker container with `--env-file .env`). The chat endpoint now streams responses from the local LLM, fully offline.
-
-> **Note:** Ollama models can be several GB; download them once while you have connectivity. Performance depends on your CPU/GPU—the smaller models (`phi3:mini`, `llama3:instruct` 8B) offer a good balance for laptops.
-
----
-
-## SMS Integration for Rural Access
-
-The application now supports SMS-based AI assistance, designed specifically for users in rural Uganda without reliable internet access.
-
-### Quick Setup
-
-1. **Get Africa's Talking Account**: Sign up at [africastalking.com](https://africastalking.com)
-2. **Configure SMS credentials** in `.env`:
-   ```bash
-   AFRICAS_TALKING_API_KEY=your_api_key_here
-   AFRICAS_TALKING_USERNAME=your_username_here
-   ```
-3. **Set webhook URL** in Africa's Talking dashboard: `https://yourdomain.com/api/sms/webhook`
-
-### How It Works
-
-Users can send questions via SMS and receive AI-generated answers:
-
-```
-User SMS: "What are malaria symptoms?"
-AI Response: "Q: What are malaria symptoms?
-
-A: Common symptoms include fever, chills, headache, muscle aches..."
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-minimal.txt
+cp .env.example .env
+# set LLM_API_KEY (or DEEPSEEK_API_KEY/OPENAI_API_KEY) and LLM_MODEL
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Key Features
+Open `http://localhost:8000`. The first WHO sync fetches pages from who.int and
+may take a few seconds. Set `WHO_SYNC_ON_STARTUP=false` to skip it.
 
-- **Automatic message splitting** for long responses
-- **Uganda phone number formatting** (`0701234567` → `+000000000`)
-- **Affordable SMS rates** through local providers
-- **No internet required** for end users
-- **Same AI knowledge base** as web interface
+Health check:
 
-📖 **[Complete SMS Setup Guide](SMS_SETUP_UGANDA.md)** - Detailed configuration and deployment instructions
+```bash
+curl http://localhost:8000/api/health
+```
 
----
+Optional full install with local sentence-transformers embeddings:
 
-## Maintenance Tips
+```bash
+pip install -r requirements.txt
+```
 
-- Delete `storage/chroma/` and `storage/uploads/` to reset the index.
-- Adjust chunk size, overlap, or model names via `app/config.py`.
-- Local embeddings download the first time you run them; allow a minute for the initial model pull.
-- Clear the cache by restarting the server (cached answers are in-memory only).
+## Architecture
+
+```
+FastAPI (app/main.py)
+  ├─ /api/chat          streaming RAG answer
+  ├─ /api/bootstrap     documents, WHO status, suggestions
+  ├─ /api/who           runtime WHO sync status
+  ├─ /api/documents     upload / delete sources
+  ├─ /data/facilities.json
+  └─ /api/auth/*        optional Supabase scaffold (not mounted in UI)
+
+app/services/
+  retrieval.py          prompt, language instruction, streaming, citations
+  who_knowledge.py      runtime WHO fetch + heading-aware chunking
+  ingestion.py          PDF, OCR, SCORM, web ingestion
+  embeddings.py         hash / local / OpenAI-compatible embeddings
+  vectorstore.py        Chroma wrapper
+
+templates/chat.html     three-screen shell
+static/css/chat.css     design tokens and responsive layout
+static/js/chat.js       i18n, chat, privacy, quick exit, find care, speech
+static/i18n/*.json      one file per language
+data/facilities.json    placeholder facilities (replace before launch)
+```
+
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `LLM_PROVIDER` | Label for your OpenAI-compatible provider. |
+| `LLM_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` | Provider key. |
+| `LLM_BASE_URL` / `OPENAI_BASE_URL` / `DEEPSEEK_BASE_URL` | Provider base URL. |
+| `LLM_MODEL` / `CHAT_MODEL` | Model name. `LLM_MODEL` wins. |
+| `EMBEDDING_BACKEND` | `hash` (default), `local`, or `openai`. |
+| `WHO_SYNC_ON_STARTUP` | Fetch WHO pages at boot (default `true`). |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Optional auth scaffold. |
+| `AUTH_REQUIRED` | Gate chat behind sign-in (default `false`). |
+
+Secrets belong in `.env`, which is gitignored. See `.env.example`.
+
+## Privacy summary
+
+| Promise | How it is kept |
+| --- | --- |
+| No account, name or phone | Chat works without auth; no sign-up UI. |
+| Chats unsaved by default | Save switch defaults off; no server chat persistence. |
+| Saved chats stay local | Browser `localStorage` only, never sent to the server. |
+| Delete means delete | Removes the saved chat key and in-memory messages. |
+| Quick exit | Clears memory, removes saved chats, `location.replace`. |
+| Location stays local | One geolocation read, client-side distance, no request/storage. |
+| Listen is browser-only | `speechSynthesis`; hidden when no matching voice exists. |
+| No diagnosis | Prompt and UI disclaimers; urgent-care language for danger signs. |
+
+Full verification table: [`docs/SAFETY_AND_PRIVACY.md`](docs/SAFETY_AND_PRIVACY.md).
+
+## WHO content and licensing
+
+WHO article text is **not committed**. `app/services/who_knowledge.py` stores
+only topic IDs, short titles and canonical URLs, then fetches page text at
+runtime and caches it under `storage/who_cache/` (gitignored). See `NOTICE` and
+the [WHO reuse terms](https://www.who.int/about/policies/publishing/copyright).
+
+Licences:
+
+- Code: **MIT** — `LICENSE`
+- Docs, UI copy and screenshots created by Lafia: **CC BY 4.0** —
+  `LICENSE-DOCS.md`
+- WHO content: its own terms — `NOTICE`
+- Split explained in `LICENSING.md`
+
+## Tests and CI
+
+```bash
+pip install -r requirements-dev.txt
+ruff check app tests
+pytest -q
+```
+
+CI runs lint and offline tests on every push and pull request. The tests check
+language files, placeholder facilities, WHO metadata-only storage, language
+prompting, no server answer cache, and privacy-related ignore rules.
+
+## Known limits
+
+- Uploaded documents are shared across users; per-user isolation is not done.
+- The LLM provider sees the question and retrieved context.
+- Low-resource translations (Acholi, Ateso, Lusoga) need human review.
+- Facility names, numbers and hours are placeholders.
+- No rate limiting, clinical governance or DPIA yet.
+
+## UNICEF FemTech
+
+The strongest fit is **Pillar 2: informed, safe and accessible reproductive
+health**. See [`docs/UNICEF_FEMTECH_FIT.md`](docs/UNICEF_FEMTECH_FIT.md).
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+and [`docs/TRANSLATING.md`](docs/TRANSLATING.md).

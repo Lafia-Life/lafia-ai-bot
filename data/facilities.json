@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "placeholder": true,
+    "notice": "Every facility below is fictional placeholder data. Replace all names, numbers, hours, coordinates and services with verified local information before launch. Do not treat this file as medical or emergency guidance."
+  },
+  "emergency": {
+    "label": "Emergency call",
+    "display": "112",
+    "tel": "112",
+    "placeholder": true,
+    "note": "Placeholder number. Verify the correct local emergency number before launch."
+  },
+  "chw": {
+    "name": "Placeholder Community Health Worker",
+    "phone": "+000000000",
+    "hours": "Placeholder hours",
+    "placeholder": true
+  },
+  "facilities": [
+    {
+      "id": "placeholder-a",
+      "name": "Placeholder Health Centre A",
+      "type": "Health centre",
+      "address": "Placeholder address A",
+      "phone": "+000000000",
+      "hours": "Placeholder hours",
+      "services": ["Placeholder service"],
+      "latitude": 0.3476,
+      "longitude": 32.5825,
+      "placeholder": true
+    },
+    {
+      "id": "placeholder-b",
+      "name": "Placeholder Health Centre B",
+      "type": "Clinic",
+      "address": "Placeholder address B",
+      "phone": "+000000000",
+      "hours": "Placeholder hours",
+      "services": ["Placeholder service"],
+      "latitude": 0.3602,
+      "longitude": 32.5901,
+      "placeholder": true
+    },
+    {
+      "id": "placeholder-c",
+      "name": "Placeholder Health Centre C",
+      "type": "Hospital",
+      "address": "Placeholder address C",
+      "phone": "+000000000",
+      "hours": "Placeholder hours",
+      "services": ["Placeholder service"],
+      "latitude": 0.3251,
+      "longitude": 32.5702,
+      "placeholder": true
+    }
+  ]
+}

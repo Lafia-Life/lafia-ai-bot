@@ -2,62 +2,310 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MoH E-Learning Assistant</title>
-    <link rel="stylesheet" href="/static/css/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#B3216F" />
+    <meta
+      name="description"
+      content="Lafia Chat AI is a private, source-cited health companion for women and girls."
+    />
+    <link rel="icon" type="image/png" href="/static/brand/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/css/chat.css?v=20261109b" />
+    <title>Lafia Chat AI</title>
   </head>
   <body>
-    <main class="app-shell">
-      <header class="app-header">
-        <div class="brand">
-          <img class="brand-mark" src="/static/logo.png" style="width: 100px; height: 100px" alt="MoH Logo" />
-          <h1>MoH E-Learning Assistant</h1>
-        </div>
-        <div class="header-actions">
-          <span class="header-badge">Chat Only</span>
-        </div>
-      </header>
+    <div class="app" id="app">
+      <!-- ───────────────── Screen 1: language + consent ───────────────── -->
+      <section class="screen consent-screen" id="screen-consent" aria-labelledby="consent-title">
+        <div class="consent-shell">
+          <header class="consent-brand">
+            <img class="brand-logo" src="/static/brand/lafia-logo.png" alt="Lafia" />
+          </header>
 
-      <section id="chat-view" class="view">
-        <div class="chat-layout">
-          <aside class="reference-panel">
-            <div class="panel-header">
-              <h2>Elearning Assistant</h2>
-              <p class="panel-subtitle">Preview the passages backing each answer.</p>
-            </div>
-            <div id="reference-list" class="reference-list"></div>
-          </aside>
-          <section class="conversation-panel">
-            <div id="chat-messages" class="messages"></div>
-            <form id="chat-form" class="chat-form">
-              <label class="sr-only" for="question">Ask a question</label>
-              <div class="chat-input">
-                <textarea id="question" name="question" rows="3" placeholder="Ask about your documents..." required></textarea>
-                <div class="chat-actions">
-                    <button id="voice-btn" style="background-color: cornflowerblue" title="Record your voice ">
-                     🎙️
-                    </button>
-                  <button type="submit">Send</button>
+          <div class="consent-card">
+            <p class="eyebrow" data-i18n="consent.eyebrow"></p>
+            <h1 id="consent-title" data-i18n="consent.title"></h1>
+            <p class="lead" data-i18n="consent.subtitle"></p>
+
+            <label class="language-field" for="language-select">
+              <span data-i18n="consent.languageLabel"></span>
+              <select id="language-select" class="language-select" data-i18n-aria="chat.language"></select>
+            </label>
+
+            <h2 class="privacy-heading" data-i18n="consent.privacyTitle"></h2>
+            <ul class="promise-list">
+              <li class="promise">
+                <span class="promise-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5 19 6v5.5c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6l7-2.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div>
+                  <h3 data-i18n="consent.promise1Title"></h3>
+                  <p data-i18n="consent.promise1Body"></p>
                 </div>
-              </div>
-              <p id="chat-status" class="status" role="status"></p>
-            </form>
-          </section>
+              </li>
+              <li class="promise">
+                <span class="promise-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2.5" stroke="currentColor" stroke-width="1.7"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                </span>
+                <div>
+                  <h3 data-i18n="consent.promise2Title"></h3>
+                  <p data-i18n="consent.promise2Body"></p>
+                </div>
+              </li>
+              <li class="promise">
+                <span class="promise-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v18M5 8.5h4l2-4 3 11 2-5h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div>
+                  <h3 data-i18n="consent.promise3Title"></h3>
+                  <p data-i18n="consent.promise3Body"></p>
+                </div>
+              </li>
+            </ul>
+
+            <label class="consent-check">
+              <input type="checkbox" id="consent-check" />
+              <span data-i18n="consent.notDiagnosis"></span>
+            </label>
+
+            <p class="emergency-note" data-i18n="consent.emergencyNote"></p>
+            <button class="primary-btn consent-continue" id="continue-btn" type="button" disabled>
+              <span data-i18n="consent.continue"></span>
+            </button>
+            <p class="hint center" data-i18n="consent.quickExitHint"></p>
+          </div>
         </div>
       </section>
-    </main>
-    <script src="/static/js/app.js?v=20251108"></script>
-    <div id="reference-modal" class="reference-modal hidden" role="dialog" aria-modal="true" aria-labelledby="reference-modal-title">
-      <div class="reference-modal-dialog">
-        <header class="reference-modal-header">
-          <h3 id="reference-modal-title" class="reference-modal-title">Document preview</h3>
-          <div class="reference-modal-actions">
-            <a id="reference-modal-open" class="reference-link hidden" target="_blank" rel="noopener noreferrer">Open full PDF</a>
-            <button type="button" id="reference-modal-close" class="modal-close" aria-label="Close preview">×</button>
+
+      <!-- ───────────────── Screen 2: chat ───────────────── -->
+      <section class="screen chat-screen" id="screen-chat" aria-labelledby="chat-title" hidden>
+        <div class="chat-shell">
+          <div class="chat-main">
+            <header class="app-bar">
+              <div class="brand-mini">
+                <img src="/static/brand/lafia-mark.png" alt="" />
+                <span data-i18n="app.brand"></span>
+              </div>
+              <div class="app-bar-actions">
+                <select id="chat-language" class="language-mini" data-i18n-aria="chat.language"></select>
+                <button class="icon-btn mobile-only" id="sources-btn" type="button" data-i18n-aria="chat.sourcesAria">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H11v16H6.5A1.5 1.5 0 0 1 5 18.5v-13ZM13 4h4.5A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="icon-btn" id="privacy-btn" type="button" data-i18n-aria="chat.privacyAria">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5 19 6v5.5c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6l7-2.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v3.5M12 15.5h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </button>
+                <button class="quick-exit" id="quick-exit" type="button" data-i18n-aria="chat.quickExitAria">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7M17 8l4 4-4 4M21 12H10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span data-i18n="chat.quickExit"></span>
+                </button>
+              </div>
+            </header>
+
+            <main class="messages" id="messages" aria-live="polite">
+              <div class="welcome" id="welcome">
+                <div class="welcome-mark">
+                  <img src="/static/brand/lafia-mark.png" alt="" />
+                </div>
+                <h1 id="chat-title" data-i18n="chat.welcomeTitle"></h1>
+                <p class="lead" data-i18n="chat.welcomeSubtitle"></p>
+                <div class="suggestions" id="suggestions"></div>
+                <p class="disclaimer" data-i18n="chat.disclaimer"></p>
+              </div>
+            </main>
+
+            <div class="composer-wrap">
+              <form class="composer" id="chat-form">
+                <button class="icon-btn mic-btn" id="mic-btn" type="button" data-i18n-aria="chat.micAria">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="3.5" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3.5M9 20.5h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                </button>
+                <label class="sr-only" for="question" data-i18n="chat.inputPlaceholder"></label>
+                <textarea
+                  id="question"
+                  rows="1"
+                  data-i18n-placeholder="chat.inputPlaceholder"
+                  autocomplete="off"
+                ></textarea>
+                <button class="send-btn" id="send-btn" type="submit" data-i18n-aria="chat.sendAria">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5m0 0-6 6m6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </form>
+              <div class="quick-actions">
+                <button class="secondary-btn care-action" id="find-care-btn" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg>
+                  <span data-i18n="chat.findCare"></span>
+                </button>
+                <button class="secondary-btn mobile-only" id="open-sources" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H11v16H6.5A1.5 1.5 0 0 1 5 18.5v-13ZM13 4h4.5A1.5 1.5 0 0 1 19 5.5v13a1.5 1.5 0 0 1-1.5 1.5H13V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                  <span data-i18n="chat.sources"></span>
+                </button>
+              </div>
+            </div>
           </div>
+
+          <aside class="sources-panel desktop-only" aria-labelledby="sources-title">
+            <div class="panel-head">
+              <h2 id="sources-title" data-i18n="chat.sources"></h2>
+            </div>
+            <div class="sources-list" id="sources-list">
+              <p class="empty" data-i18n="chat.sourcesEmpty"></p>
+            </div>
+            <div class="privacy-panel">
+              <label class="switch-row">
+                <input type="checkbox" class="js-save-toggle" />
+                <span>
+                  <strong data-i18n="chat.saveChats"></strong>
+                  <small data-i18n="chat.saveChatsHint"></small>
+                </span>
+              </label>
+              <button class="danger-link js-delete-chats" type="button">
+                <span data-i18n="chat.deleteChats"></span>
+              </button>
+              <button class="secondary-btn quick-exit-panel" type="button" data-quick-exit>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7M17 8l4 4-4 4M21 12H10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span data-i18n="chat.quickExit"></span>
+              </button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ───────────────── Screen 3: find care ───────────────── -->
+      <section class="screen care-screen" id="screen-care" aria-labelledby="care-title" hidden>
+        <header class="app-bar care-bar">
+          <button class="icon-btn" id="care-back" type="button" data-i18n-aria="common.back">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <h1 id="care-title" data-i18n="care.title"></h1>
+          <button class="quick-exit" id="care-quick-exit" type="button" data-i18n-aria="chat.quickExitAria">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7M17 8l4 4-4 4M21 12H10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span data-i18n="chat.quickExit"></span>
+          </button>
         </header>
-        <iframe id="reference-modal-frame" title="PDF preview" class="reference-modal-frame"></iframe>
+
+        <main class="care-main">
+          <p class="lead" data-i18n="care.subtitle"></p>
+          <div class="care-actions">
+            <button class="primary-btn" id="location-btn" type="button" data-i18n-aria="care.locationAria">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg>
+              <span data-i18n="care.useLocation"></span>
+            </button>
+          </div>
+          <p class="hint" id="location-status" data-i18n="care.locationHint"></p>
+
+          <h2 class="section-title" data-i18n="care.nearby"></h2>
+          <div class="facility-list" id="facility-list" aria-live="polite"></div>
+
+          <section class="chw-card" aria-labelledby="chw-title">
+            <h2 id="chw-title" data-i18n="care.chwTitle"></h2>
+            <p data-i18n="care.chwBody"></p>
+            <button class="secondary-btn" id="chw-btn" type="button" data-i18n="care.chwButton"></button>
+          </section>
+
+          <a class="emergency-btn" id="emergency-btn" href="tel:112">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.6 4.5h2.8l1.4 3.5-1.9 1.4a12 12 0 0 0 5.7 5.7l1.4-1.9 3.5 1.4v2.8a2 2 0 0 1-2.2 2A16 16 0 0 1 4.6 6.7a2 2 0 0 1 2-2.2Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+            <span>
+              <strong data-i18n="care.emergency"></strong>
+              <small id="emergency-number"></small>
+            </span>
+          </a>
+          <p class="hint" data-i18n="care.emergencyNote"></p>
+          <p class="placeholder-note" data-i18n="care.placeholderNote"></p>
+        </main>
+      </section>
+
+      <!-- ───────────────── Privacy sheet ───────────────── -->
+      <div class="sheet" id="privacy-sheet" hidden>
+        <div class="sheet-scrim" data-close-sheet></div>
+        <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
+          <div class="sheet-head">
+            <h2 id="privacy-title" data-i18n="privacy.title"></h2>
+            <button class="icon-btn" type="button" data-close-sheet data-i18n-aria="common.close">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="sheet-body">
+            <section class="privacy-block">
+              <h3 data-i18n="privacy.noAccountTitle"></h3>
+              <p data-i18n="privacy.noAccountBody"></p>
+            </section>
+            <section class="privacy-block">
+              <h3 data-i18n="privacy.saveTitle"></h3>
+              <p data-i18n="privacy.saveBody"></p>
+              <label class="switch-row">
+                <input type="checkbox" class="js-save-toggle" />
+                <span>
+                  <strong data-i18n="chat.saveChats"></strong>
+                  <small data-i18n="chat.saveChatsHint"></small>
+                </span>
+              </label>
+            </section>
+            <section class="privacy-block">
+              <h3 data-i18n="privacy.deleteTitle"></h3>
+              <p data-i18n="privacy.deleteBody"></p>
+              <button class="danger-btn js-delete-chats" type="button" data-i18n="privacy.deleteButton"></button>
+            </section>
+            <section class="privacy-block">
+              <h3 data-i18n="privacy.quickExitTitle"></h3>
+              <p data-i18n="privacy.quickExitBody"></p>
+              <button class="secondary-btn" type="button" data-quick-exit>
+                <span data-i18n="chat.quickExit"></span>
+              </button>
+            </section>
+            <section class="privacy-block">
+              <h3 data-i18n="privacy.locationTitle"></h3>
+              <p data-i18n="privacy.locationBody"></p>
+            </section>
+          </div>
+        </div>
       </div>
+
+      <!-- ───────────────── Sources sheet (mobile) ───────────────── -->
+      <div class="sheet" id="sources-sheet" hidden>
+        <div class="sheet-scrim" data-close-sheet></div>
+        <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="mobile-sources-title">
+          <div class="sheet-head">
+            <h2 id="mobile-sources-title" data-i18n="chat.sources"></h2>
+            <button class="icon-btn" type="button" data-close-sheet data-i18n-aria="common.close">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="sheet-body">
+            <div class="sources-list" id="sources-list-mobile">
+              <p class="empty" data-i18n="chat.sourcesEmpty"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────────── Source detail sheet ───────────────── -->
+      <div class="sheet" id="source-sheet" hidden>
+        <div class="sheet-scrim" data-close-sheet></div>
+        <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="source-title">
+          <div class="sheet-head">
+            <div>
+              <p class="source-kind" id="source-kind"></p>
+              <h2 id="source-title"></h2>
+            </div>
+            <button class="icon-btn" type="button" data-close-sheet data-i18n-aria="common.close">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="sheet-body">
+            <p class="source-meta" id="source-meta"></p>
+            <blockquote class="source-excerpt" id="source-excerpt"></blockquote>
+            <div class="source-actions" id="source-actions"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     </div>
+
+    <script src="/static/js/chat.js?v=20261109b" defer></script>
   </body>
 </html>
