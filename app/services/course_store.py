@@ -10,8 +10,7 @@ from app.schemas import Course, CourseCreate, CourseUpdate
 class CourseStore:
     def __init__(self, base_path: Path):
         self._file_path = base_path / "courses.json"
-        if self._file_path.exists():        
-            self._file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._file_path.parent.mkdir(parents=True, exist_ok=True)
         if not self._file_path.exists():
             self._write({})
         else:
