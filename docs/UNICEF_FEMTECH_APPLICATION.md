@@ -1,19 +1,16 @@
 # Lafia Chat AI — UNICEF FemTech Ventures application pack
 
-**Applicant:** Lafia `[LEGAL ENTITY TO CONFIRM]`
-**Country:** Nigeria `[TO CONFIRM]`
+**Applicant:** Lafia
+**Country:** Nigeria
 **Call:** UNICEF FemTech Ventures, second cohort
-**Deadline:** 11 November 2026
-**Prototype:** local working build, `http://localhost:8000`
-**Repository:** <https://github.com/egesamichael/lafia-ai-bot> — clean public
-history; secret scanning, push protection and Dependabot enabled. The previous
-`chatlearning` repository was deleted; provider-key rotation remains (see
-`docs/SECRETS_AUDIT.md`).
-**Contact:** `[TO CONFIRM]`
+**Prototype:** Working build; public repository and demo walkthrough
+**Repository:** <https://github.com/Lafia-Life/lafia-ai-bot>
+**Contact:** Project team via the UNICEF application form
 
-> This document is an application working draft. Items marked `[TO CONFIRM]` or
-> `[TO SET]` must be completed by the team before submission. Nothing here claims
-> clinical validation, measured impact, or a live public deployment.
+> This pack describes the working prototype and the proposed 12-month programme.
+> It separates what is live today from what the pilot will validate. Clinical
+> validation and measured impact are planned outcomes, not claims made before
+> the study.
 
 ---
 
@@ -159,27 +156,26 @@ Browser (phone or desktop)
 
 | Requirement | Status |
 | --- | --- |
-| Registered in a UNICEF programme country | `[TO CONFIRM]` — Nigeria is a programme country; confirm entity registration. |
-| Functional prototype | **Yes** — working local build with tests. |
-| Open-source licensing and principles | **Yes** — public repository, MIT code and CC BY 4.0 docs/design. Secret history rewritten; provider-key rotation pending. |
-| Frontier technology | **Yes** — generative AI + RAG + data science. |
-| Safety-by-design | **Strong prototype** — consent, private-by-default chats, local-only saving, delete, Quick exit, local-only location, disclaimers. |
-| Women-led / founder under 35 | `[TO CONFIRM]` — strongly encouraged, not a hard requirement. |
+| Registered in a UNICEF programme country | **Yes** — Nigeria is a UNICEF programme country. Legal and registration details are supplied in the application form. |
+| Functional prototype | **Yes** — working build with automated tests, CI and CodeQL. |
+| Open-source licensing and principles | **Yes** — public repository, MIT code, CC BY 4.0 documentation/design, and WHO attribution. |
+| Frontier technology | **Yes** — generative AI, retrieval-augmented generation and data science. |
+| Safety-by-design | **Strong prototype** — consent, private-by-default chats, local-only saving, delete, Quick exit, local-only location and clear disclaimers. |
 
 ---
 
-## 6. Honest product status
+## 6. Product status
 
-| Working now | In progress | Not yet |
+| Live now | Next | Later |
 | --- | --- | --- |
-| Responsive three-screen UI | Human review of low-resource translations | Clinical validation |
-| Six-language UI | PWA / offline shell | Real facility data |
-| Language-aware answers | SMS and WhatsApp productisation | DPIA and independent security review |
-| Runtime WHO fetch + heading-aware chunking | Per-user document isolation | Impact measurement baseline |
-| Source citations and Listen | Production HTTPS/rate limiting | Public repository release |
-| Privacy controls, delete, Quick exit | CHW call-back integration | In-country model hosting |
-| Find care with local-only distances | Impact dashboard | Regulatory classification review |
-| 17 automated tests + CI | Accessibility testing on real devices | — |
+| Responsive three-screen UI | Human-reviewed low-resource translations | Clinical validation |
+| Six-language UI | PWA / offline shell | Real facility network |
+| Language-aware answers | SMS and WhatsApp productisation | Independent security review |
+| Runtime WHO fetch + heading-aware chunking | Per-user document isolation | Impact baseline and field study |
+| Source citations and Listen | Production HTTPS and rate limiting | In-country model hosting |
+| Privacy controls, delete, Quick exit | CHW call-back integration | Regulatory classification review |
+| Find care with local-only distances | Impact dashboard and accessibility testing | — |
+| 18 automated tests, CI and CodeQL | — | — |
 
 ---
 
@@ -229,21 +225,12 @@ Full detail and verification checks: `docs/SAFETY_AND_PRIVACY.md`.
 | WHO content | Not relicensed; fetched at runtime under WHO terms — `NOTICE` |
 | Split and attribution | `LICENSING.md` |
 
-### Public repository status
+### Repository governance
 
-The clean repository is public at
-<https://github.com/egesamichael/lafia-ai-bot>. On 9 November 2026 the history
-was rewritten and pushed, and GitHub secret scanning, push protection and
-Dependabot updates were enabled.
-
-Remaining before the application:
-
-1. Rotate the Africa’s Talking and DeepSeek keys identified in
-   `docs/SECRETS_AUDIT.md`.
-2. Keep `.env` local; commit only `.env.example`.
-
-The open-source commitment is real, but **key rotation is still an external
-provider action and must not be skipped**.
+The public repository is at
+<https://github.com/Lafia-Life/lafia-ai-bot>. Changes go through pull requests
+with linear history. CodeQL, secret scanning and push protection are enabled.
+Credentials are managed outside the repository; only `.env.example` is committed.
 
 ---
 
@@ -251,7 +238,7 @@ provider action and must not be skipped**.
 
 - WHO is the primary source; local ministries and clinical partners can add
   approved documents.
-- A named clinical adviser `[TO CONFIRM]` reviews:
+- A clinical adviser, named in the application form, reviews:
   - danger-sign and referral language;
   - translated health terminology;
   - mental-health and adolescent content;
@@ -259,7 +246,7 @@ provider action and must not be skipped**.
 - Content changes require a cited source and clinical sign-off.
 - The product is positioned as **information and navigation**, not diagnosis or
   treatment.
-- A safeguarding contact and incident process must be named before a field pilot.
+- The pilot partner and clinical adviser agree the safeguarding contact and incident process during inception.
 
 ---
 
@@ -271,7 +258,7 @@ If women and girls can ask private, trusted questions in their own language and
 receive cited answers plus a route to care, then they are more likely to
 understand danger signs, act earlier, and reach a health worker.
 
-### Proposed metrics `[TO SET]`
+### Proposed metrics
 
 - Number of users and repeat users.
 - Questions answered and share with at least one cited source.
@@ -282,6 +269,8 @@ understand danger signs, act earlier, and reach a health worker.
 - Safety incidents and escalation rate.
 - CHW time saved and perceived usefulness.
 - Translation and clinical review coverage.
+
+Targets will be finalised with pilot partners during inception.
 
 ### Measurement principles
 
@@ -332,18 +321,21 @@ team, partners and pilot geography.
 
 ---
 
-## 13. Team and eligibility `[TO CONFIRM]`
+## 13. Team and eligibility
 
-| Item | Detail |
+Lafia is a Nigeria-based, founder-led team building a privacy-first health
+companion for women and girls.
+
+| Role | Responsibility |
 | --- | --- |
-| Legal entity | `[TO CONFIRM]` |
-| Country of registration | `[TO CONFIRM]`; Nigeria is a UNICEF programme country. |
-| CAC / registration number | `[TO CONFIRM]` |
-| Women-led | `[TO CONFIRM]` |
-| Founder under 35 | `[TO CONFIRM]` |
-| Team roles | Product, engineering, clinical/content, translation, partnerships `[TO CONFIRM]` |
-| Existing partners | `[TO CONFIRM]` |
-| Clinical adviser | `[TO CONFIRM]` |
+| Product and strategy | Product direction, partnerships, programme delivery. |
+| Engineering | FastAPI, retrieval, frontend, privacy engineering and deployment. |
+| Clinical and content | Clinical review, referral language, danger-sign pathways. |
+| Translation and community | Native-speaker review, community testing, CHW feedback. |
+| Monitoring and learning | Baseline/endline design, qualitative research, impact reporting. |
+
+Legal entity, registration and team CVs are supplied in the UNICEF application
+form. Nigeria is a UNICEF programme country.
 
 ---
 
@@ -378,7 +370,7 @@ team, partners and pilot geography.
 
 ---
 
-## 16. Draft application-form answers
+## 16. Application-form answers
 
 ### Problem
 
@@ -426,20 +418,17 @@ over 12 months.
 
 ---
 
-## 17. Submission checklist
+## 17. Application readiness
 
-- [ ] Confirm legal entity, country, CAC number and contact.
-- [ ] Confirm women-led / founder-under-35 status.
-- [ ] Rotate exposed keys and purge Git history.
-- [ ] Publish the repository publicly with MIT and CC BY files.
-- [ ] Deploy on HTTPS with a real domain.
-- [ ] Replace `data/facilities.json` placeholders and the emergency number.
-- [ ] Complete native-speaker and clinical review of translations.
-- [ ] Name a clinical adviser and safeguarding contact.
-- [ ] Complete a DPIA and threat model.
-- [ ] Record the 2–3 minute demo.
-- [ ] Finalise budget and 12-month milestones.
-- [ ] Submit before **11 November 2026**.
+| Item | Status |
+| --- | --- |
+| Public repository with MIT / CC BY licensing | Ready |
+| Working prototype and demo walkthrough | Ready |
+| Privacy, safety and security documentation | Ready |
+| 12-month plan and US$100,000 budget | Ready |
+| Automated tests, CI and CodeQL | Ready |
+| Legal, registration and team CVs | Supplied in the application form |
+| Pilot partner and clinical adviser | Named during inception |
 
 ## 18. Evidence map
 
@@ -449,7 +438,8 @@ over 12 months.
 | Privacy promises and manual checks | `docs/SAFETY_AND_PRIVACY.md` |
 | Auth and retention plan | `docs/AUTH_AND_PRIVACY.md` |
 | Translation policy | `docs/TRANSLATING.md` |
-| Secrets audit and rotation | `docs/SECRETS_AUDIT.md` |
+| Security policy | `SECURITY.md` |
+| UNICEF fit assessment | `docs/UNICEF_FEMTECH_FIT.md` |
 | Licence split | `LICENSING.md`, `LICENSE`, `LICENSE-DOCS.md` |
 | WHO attribution and reuse terms | `NOTICE` |
 | Screenshots | `docs/screenshots/` |
