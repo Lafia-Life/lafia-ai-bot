@@ -33,9 +33,11 @@ We aim to acknowledge reports within 72 hours.
 
 ## Dependency status
 
-As of 9 November 2026, GitHub Dependabot reports **129 open alerts** on the
-default branch: 5 critical, 53 high, 64 moderate and 7 low. These come from the
-pinned Python dependencies inherited from the original prototype.
+As of 9 November 2026, GitHub Dependabot reports **400+ open alerts** on the
+default branch (the latest push reported 406: 16 critical, 179 high, 190
+moderate and 21 low). These come from the pinned Python dependencies inherited
+from the original prototype. Counts change as GitHub rescans and should be
+treated as a production blocker, not a fixed number.
 
 Do not deploy this build to production until the alerts are triaged. The CI
 workflow installs `requirements-minimal.txt` for a fast, offline test run; that
