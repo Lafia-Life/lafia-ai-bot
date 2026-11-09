@@ -31,6 +31,22 @@ We aim to acknowledge reports within 72 hours.
 - WHO text is fetched at runtime; no WHO article text is committed.
 - Secrets are expected in environment variables only. `.env` is gitignored.
 
+## Dependency status
+
+As of 9 November 2026, GitHub Dependabot reports **129 open alerts** on the
+default branch: 5 critical, 53 high, 64 moderate and 7 low. These come from the
+pinned Python dependencies inherited from the original prototype.
+
+Do not deploy this build to production until the alerts are triaged. The CI
+workflow installs `requirements-minimal.txt` for a fast, offline test run; that
+does not remove the vulnerabilities. Remediation should:
+
+1. Upgrade the runtime dependencies in a branch.
+2. Re-run `ruff`, `pytest` and the browser privacy checks.
+3. Exercise WHO retrieval, uploads, streaming chat and Find care.
+4. Remove unused integrations and pin the smallest possible dependency set.
+5. Re-enable Dependabot updates and confirm the alert count drops.
+
 ## Known gaps
 
 - Uploaded documents are still shared across users; per-user isolation is not

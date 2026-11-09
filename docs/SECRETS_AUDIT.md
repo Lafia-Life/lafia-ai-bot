@@ -26,9 +26,12 @@ No secret values are reproduced in this document.
 2. Revoke and replace the Africa's Talking key in its dashboard.
 3. Update the local `.env` with the new values.
 4. Mark the GitHub secret-scanning alert as resolved **after** revocation.
-5. Old commit SHAs can remain reachable through GitHub's object cache even after
-   a force-push. Ask GitHub Support to purge unreachable commits, or delete and
-   recreate the repository if a completely clean public history is required.
+5. **Old commit SHAs remain cached by GitHub.** After the force-push, the old
+   commit page and the old raw `.env.example` URL still returned HTTP 200. Ask
+   GitHub Support to purge unreachable commits, or delete and recreate the
+   repository if a completely clean public object history is required. This is
+   not something a normal force-push can remove.
+6. Triage the open Dependabot alerts before production use (see `SECURITY.md`).
 
 ## Findings
 
